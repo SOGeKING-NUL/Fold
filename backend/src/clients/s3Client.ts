@@ -10,9 +10,3 @@ export const s3 = new S3Client({
 });
 
 export default s3;
-
-function init(){
-    console.log("S3 Client:", s3);
-}
-
-init();

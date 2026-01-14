@@ -5,7 +5,7 @@
   "main": "idex.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-    "dev": "node --loader ts-node/esm src/index.ts"
+    "dev": "node --import tsx src/index.ts"
   },
   "repository": {
     "type": "git",
@@ -21,14 +21,17 @@
   "homepage": "https://github.com/SOGeKING-NUL/Fold#readme",
   "dependencies": {
     "@aws-sdk/client-s3": "^3.943.0",
+    "@aws-sdk/s3-request-presigner": "^3.943.0",
+    "cors": "^2.8.5",
     "dotenv": "^17.2.3",
     "express": "^5.2.1",
-    "node": "^20.19.6",
     "typescript": "^5.9.3"
   },
   "devDependencies": {
     "@types/express": "^5.0.6",
     "@types/node": "^24.10.1",
-    "ts-node": "^10.9.2"
+    "ts-node": "^10.9.2",
+    "ts-node-dev": "^2.0.0",
+    "tsx": "^4.19.2"
   }
 }
