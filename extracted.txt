@@ -1,0 +1,51 @@
+Technical Report: Multi-Modal Financial Ledger System
+1. Project Overview
+The Financial Ledger is an advanced multi-modal AI system designed to automate personal expense tracking across diverse payment sources, including Debit Cards (e.g., SBI), Credit Cards (e.g., HDFC), and Cash. The system eliminates manual data entry by processing unstructured inputs—receipt photos, voice notes, and SMS—through a unified Python-based pipeline.
+2. Core Architecture & Payment Tracking
+The system acts as a central aggregator for a user’s entire financial ecosystem.
+Payment Source
+Input Method
+Processing Logic
+Credit/Debit Cards
+Forwarded SMS / Bank Alerts
+NLP Regex & NER Extraction
+Physical Receipts
+Photo Upload (WhatsApp/App)
+OCR + Coordinate Sorting
+Cash Transactions
+Voice Notes / Manual Text
+Custom STT (Whisper) + Intent Classifier
+Multi-Source Accounting Logic
+The database (Supabase/PostgreSQL) is structured with a payment_methods table linked to each transaction. - SBI Debit / HDFC Credit: Identified via SMS header patterns (e.g., “VM-HDFCBK”) or OCR vendor matching. - Cash: Defaulted when voice notes contain keywords like “nukad” or “cash diya.” - Reconciliation: A daily summary script aggregates spending across all accounts to provide a holistic net-worth view.
+3. Deep Dive: Custom OCR & Data Integrity
+To ensure “Total” amounts are correctly paired with “Items,” we move beyond basic OCR by implementing a custom spatial sorting algorithm.
+Python Modules Used:
+PaddleOCR or EasyOCR: For raw text and bounding box detection.
+OpenCV (cv2): For image deskewing, grayscaling, and thresholding.
+NumPy: For coordinate matrix manipulations.
+The Coordinate Sorting Algorithm
+OCR engines often return text in a “jumbled” order based on detection confidence rather than reading order. Our custom implementation follows these steps: 1. Raw Extraction: Extract text strings along with their (x, y, w, h) bounding box coordinates. 2. Y-Axis Grouping: Group all text fragments where the difference in their y-coordinates is less than a specific threshold (e.g., 10 pixels). This ensures text on the same horizontal line is treated as a single “row.” 3. X-Axis Sorting: Within each horizontal group, sort the text fragments by their x-coordinates (left to right). 4. Line Reconstruction: Concatenate the sorted fragments to rebuild the receipt line (e.g., “Chicken Biryani …. ₹250”). 5. Entity Mapping: Search for currency symbols (₹, $) or keywords (Total, Amount) within the reconstructed lines to extract the final transaction value.
+4. Custom Speech-to-Text (STT) & Classification
+To avoid “off-the-shelf” black-box solutions, we build a localized STT system optimized for Indian “Hinglish” contexts.
+The STT Pipeline:
+Base Model: OpenAI Whisper (Small/Medium). We utilize the openai-whisper Python library to run inference locally on the user’s server/laptop.
+Audio Pre-processing: Use Librosa to normalize volume and remove background noise from WhatsApp voice notes (typically .ogg or .mp4 files).
+Transcription: Whisper converts the audio into raw text (e.g., “Samosa ke liye bees rupaye cash diye”).
+Custom Classification Layer:
+Instead of relying on a general LLM, students build a Custom Intent Classifier using: - Module: Scikit-Learn or PyTorch. - Logic: A Text Classification Model (e.g., Random Forest or DistilBERT) trained on a synthetic dataset of 1,000+ Hinglish financial sentences. - Entity Extraction: A custom NER (Named Entity Recognition) layer using Spacy to identify: - AMOUNT: “bees”, “20”, “sau”. - ITEM/VENDOR: “Samosa”, “Auto”, “Petrol”. - PAYMENT_MODE: “Cash”, “Paytm”, “Card”.
+5. Technical Stack & Implementation Setup
+Required Python Modules:
+Web/API: FastAPI, Uvicorn (For the WhatsApp Webhook router).
+Vision: opencv-python, paddleocr, numpy.
+Audio: openai-whisper, librosa, pydub.
+NLP: spacy, scikit-learn, transformers.
+Database: supabase-py, pandas.
+System Setup:
+Webhook Tunnel: Use Ngrok to expose the local FastAPI port to the internet.
+Twilio Integration: Configure the Twilio Sandbox for WhatsApp to point to the Ngrok URL.
+Routing Logic:
+Incoming Media (Images/Audio)  Processed by Vision/Audio modules.
+Incoming Text (SMS/Direct Message)  Processed by NLP module.
+Storage: All structured JSON data is pushed to Supabase, which triggers an update to the Streamlit analytics dashboard.
+6. Conclusion
+This system represents a sophisticated integration of modern AI techniques. By building custom sorting and STT layers, the project ensures high data accuracy and handles the complexities of real-world financial tracking across multiple payment systems.
