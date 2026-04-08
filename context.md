@@ -96,3 +96,31 @@ Because UPI screenshots contain diverse merchant tools (BHIM, PhonePe, GPay, Pay
 * `"card"`
 * `"cash"`
 * `"unknown"` (Fallback)
+
+---
+
+### Update: Voice Note Extraction (STT Pipeline)
+To handle spoken Hinglish voice notes (the second major input channel alongside receipt images), we built a Speech-to-Text pipeline (`src/stt/transcriber.py`) using **OpenAI Whisper** running locally.
+
+#### Why Whisper?
+Whisper was trained on 680,000 hours of multilingual audio data scraped from the web. Unlike Google STT or AWS Transcribe, which require explicit language selection and struggle with code-switching, Whisper natively handles **Hinglish** — the fluid mix of Hindi and English that Indian users default to when speaking about money (e.g., "Swiggy se do sau pachaas rupaye ka order kiya, UPI se pay kiya").
+
+#### Architecture (3 Steps)
+The module mirrors the OCR extractor's structure exactly:
+
+1. **Transcription (Whisper `base` model):** The audio file (.ogg, .wav, .mp3, etc.) is decoded via FFmpeg and passed to Whisper's encoder-decoder transformer. We inject a **domain prompt** — a pre-written Hinglish banking sentence — into Whisper's `initial_prompt` parameter. This is a critical engineering trick: it anchors the model's decoder latent space to our financial vocabulary, preventing it from force-translating Hindi words into English or hallucinating irrelevant text. We set `language="hi"` to keep the decoder in Hindi mode (which naturally preserves Hinglish code-switching).
+
+#### Output Format
+The `process_audio()` method simply returns a dict with the raw transcript:
+```json
+{
+    "transcript": "Spent 3000 rupees on shopping."
+}
+```
+*Note: We deliberately decided against attempting complex regex amount/payment extraction within the STT module itself. Because the downstream Artificial NLP Layer will be explicitly trained to parse intent and extract entity slots from Hinglish sentences, we only require Whisper to deliver an accurate string, delegating all intelligence to the NLP classifier.*
+
+#### Dependencies & Environment Notes
+* **openai-whisper** (installed via `pip install openai-whisper`). This is the *local* model, not the OpenAI API — no API key needed, no network calls during inference.
+* **FFmpeg 8.1** (installed via `winget install Gyan.FFmpeg`). Required by Whisper to decode audio containers (OGG/Opus from WhatsApp, M4A from iPhone voice memos, etc.) into raw PCM waveforms. Must be on the system PATH.
+* **torch** (pulled automatically by whisper). We are using the CPU-only variant (`fp16=False` in transcribe config) to avoid CUDA dependency on development machines.
+* **Model size:** Using `base` (139 MB download, ~1 GB RAM at inference). Can be upgraded to `small` (461 MB) for higher accuracy if hardware allows.
