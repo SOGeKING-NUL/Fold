@@ -124,3 +124,19 @@ The `process_audio()` method simply returns a dict with the raw transcript:
 * **FFmpeg 8.1** (installed via `winget install Gyan.FFmpeg`). Required by Whisper to decode audio containers (OGG/Opus from WhatsApp, M4A from iPhone voice memos, etc.) into raw PCM waveforms. Must be on the system PATH.
 * **torch** (pulled automatically by whisper). We are using the CPU-only variant (`fp16=False` in transcribe config) to avoid CUDA dependency on development machines.
 * **Model size:** Using `base` (139 MB download, ~1 GB RAM at inference). Can be upgraded to `small` (461 MB) for higher accuracy if hardware allows.
+
+---
+
+### Update: Hybrid Payment Tracking (NLP + UX)
+Extracting the `payment_method` exclusively from free-form WhatsApp voice notes introduces a vulnerability. Users often say "Zomato pe 500 ka kharcha kiya" but completely omit *how* they paid (UPI, cash, etc.).
+
+Instead of blindly defaulting to "unknown" and corrupting the financial database, we have agreed on a **Hybrid Architecture (NLP layer + Chatbot UX)**:
+
+1. **Attempt NLP Extraction First:** Deep inside the NLP Inference layer, we will run a specialized Regex/Dictionary matcher against the transcript. It scans for explicit mentions:
+   * **UPI:** `"upi", "gpay", "paytm", "phonepe", "bhim", "cred"`
+   * **Card:** `"card", "visa", "mastercard", "amex"`
+   * **Cash:** `"cash", "naqad", "nakd"`
+2. **Interactive WhatsApp Fallback:** If the NLP layer returns `payment_method: null` (meaning the user didn't explicitly vocalize it), the system does **not** fail. Instead, the backend will trigger a specific WhatsApp Interactive Message containing three UI buttons: `[ 💵 Cash ]`, `[ 📱 UPI ]`, `[ 💳 Card ]`.
+3. **Database Finalization:** Once the user taps the button, the webhook receives the payload and completes the transaction row in the database.
+
+This strategy guarantees 100% data completion while maintaining a frictionless UX.
