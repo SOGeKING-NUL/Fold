@@ -137,11 +137,13 @@ class ReceiptOCR:
         Find the lines most likely to contain the final transaction amount.
         Handles cases where OCR splits the label and the amount onto adjacent lines.
         """
+        # Use word boundaries for short or ambiguous abbreviations to prevent them from matching inside words (e.g. "Storm" matching "St")
         triggers = re.compile(
-            r'(?:total|amount|paid|cash|card|upi|net|inr|rs\.?|stl?|tl|₹|grand|arand)',
+            r'\b(?:total|amount|paid|cash|card|upi|net|inr|rs\.?|st|stl|tl|grand|arand)\b|₹|total:|total\s*',
             re.IGNORECASE
         )
-        has_amount = re.compile(r'\d{2,}')  # at least a 2-digit number
+        # Match strict decimals OR integers explicitly preceded by a currency marker or 'paid'
+        has_amount = re.compile(r'\d{2,}\.\d{2}|(?:\b(?:rs\.?|inr|r)|₹)\s*\d{1,}', re.IGNORECASE)
 
         key = []
         n = len(lines)
@@ -178,35 +180,68 @@ class ReceiptOCR:
     def extract_payment_details(self, key_lines: list) -> dict:
         """
         Parses the filtered key lines to extract the final payment amount
-        and the mode of payment (Cash, Card, UPI, etc.)
+        by strictly associating it with explicit finality keywords instead of max().
         """
-        amount = None
+        final_amount = None
         payment_method = "unknown"
-        amounts = []
+        
+        # Keywords that strongly indicate the line holds the final transaction amount
+        total_keywords = ["grand total", "total", "payable", "cash", "net amount", "amount paid", "balance", "net", "paid", "sent", "successful"]
+        
+        found_amounts = []
+        all_fallback_amounts = []
         
         for line in key_lines:
-            # Extract decimals like 185.00, 1,200.50, etc.
-            matches = re.findall(r'\b\d{1,3}(?:,\d{3})*(?:\.\d{2})\b|\b\d+\.\d{2}\b', line)
-            if not matches:
-                matches = re.findall(r'\b\d+\.\d+\b', line)
+            lower_line = line.lower()
             
+            # Extract Payment Mode and map to core 3 types (cash, card, upi)
+            # Map specific keywords to their parent categories
+            upi_keywords = ["upi", "gpay", "paytm", "bhim", "phonepe", "bharatpe", "cred"]
+            card_keywords = ["card", "visa", "mastercard", "amex"]
+            cash_keywords = ["cash"]
+            
+            for kw in upi_keywords:
+                if kw in lower_line:
+                    payment_method = "upi"
+            for kw in card_keywords:
+                if kw in lower_line:
+                    payment_method = "card"
+            for kw in cash_keywords:
+                if kw in lower_line:
+                    payment_method = "cash"
+
+            # Find all strict float numbers on this line (allowing preceding letters/symbols like R500 or ₹500 removing the \b boundary constraint)
+            matches = re.findall(r'(?<!\d)\d{1,3}(?:,\d{3})*(?:\.\d{2})\b|(?<!\d)\d+\.\d{2}\b', line)
+            
+            # If no strict decimals, search for integer amounts explicitly tagged with currency
+            if not matches:
+                curr_matches = re.findall(r'(?:\b(?:rs\.?|inr|r)|[₹$])\s*(\d{1,3}(?:,\d{3})*|\d+)', lower_line)
+                matches = curr_matches
+
+            line_amounts = []
             for m in matches:
                 val = float(m.replace(',', ''))
                 if val > 0:
-                    amounts.append(val)
-            
-            # Extract Payment Mode
-            lower_line = line.lower()
-            modes = ["cash", "card", "upi", "visa", "mastercard", "gpay", "paytm", "amex"]
-            for mode in modes:
-                if mode in lower_line:
-                    payment_method = mode
+                    line_amounts.append(val)
+                    all_fallback_amounts.append(val)
+                    
+            if not line_amounts:
+                continue
 
-        # The Grand Total is typically the largest valid monetary value in the heavily filtered key_lines
-        if amounts:
-            amount = max(amounts)
+            # Prioritize amounts that explicitly sit on the same line as "total", "grand total", etc.
+            is_total_line = any(kw in lower_line for kw in total_keywords)
+            if is_total_line:
+                # If there are multiple numbers on a "Total" line, the largest is typically the total itself
+                found_amounts.append(max(line_amounts))
+                
+        if found_amounts:
+            # If we found multiple explicit total lines (e.g. Subtotal vs Grand Total), take the max to get the final bill
+            final_amount = max(found_amounts)
+        elif all_fallback_amounts:
+            # Fallback for extremely noisy receipts where the word 'Total' was obliterated
+            final_amount = max(all_fallback_amounts)
 
-        return {"amount": amount, "payment_method": payment_method}
+        return {"amount": final_amount, "payment_method": payment_method}
 
     # ─── End-to-End Pipeline ────────────────────────────────────────────
 
@@ -239,7 +274,7 @@ class ReceiptOCR:
 # ═══════════════════════════════════════════════════════════════════════
 if __name__ == "__main__":
     import json
-    IMG = "../../receipt2.jpg"
+    IMG = "../../receipt7.jpg"
 
     ocr = ReceiptOCR()
 

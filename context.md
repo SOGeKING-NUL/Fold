@@ -75,3 +75,24 @@ We have since successfully resolved the local Windows build constraints and full
 During the migration, we discovered two critical architectural learnings:
 1. **Raw Processing vs. Preprocessing:** The intensive OpenCV pipeline that served as a "crutch" to highlight text for EasyOCR actually *degraded* PaddleOCR's performance. PaddleOCR utilizes profound internal Convolutional Neural Networks (CNNs) trained on real-world raw photographs, and forcibly applying Otsu binarization stripped out the subtle pixel gradients it relies upon to distinguish noise from characters. We moved to **Raw Matrix Processing**, wildly improving the engine's capability to read floating-point decimals accurately without hallucinating random characters.
 2. **Final Intent Parsing:** At the end of the spatial sorting and keyword filtering algorithm, we appended a final `extract_payment_details` Regex validation method. Instead of handing the NLP layer raw strings, `extractor.py` now internally scans the filtered keys for the largest valid monetary float mapping to the label "Total", alongside parsing standard mode keywords (`cash`, `upi`, `card`). It returns a meticulously structured JSON object (e.g., `{"amount": 185.0, "payment_method": "cash"}`). This entirely shields our future NLP architecture from having to wrestle with OCR logic constraints.
+
+### Example: How the Heuristic Filter Handles Ambiguous Lines
+**Input RAW Key Line:** 
+`>> Total : 4.00 1450.00`
+
+In this example (from `receipt5.jpg`), the word `Total` is structurally adjacent to both the quantity (`4.00`) and the final price (`1450.00`). 
+Instead of a simple regex that grabs the *first* number it sees (which would fail by extracting `4.00`), our `extract_payment_details` regex strictly extracts *every* valid float on lines containing `Total/Payable`. It generates an array of candidates: `[4.0, 1450.0]`. 
+
+Because it is evaluating a designated "Total" line, it applies `max([4.0, 1450.0])`, perfectly bypassing quantities and discounts to output the true JSON:
+{
+    "amount": 1450.0,
+    "payment_method": "unknown"
+}
+```
+
+### Payment Method Normalization (ENUMs)
+Because UPI screenshots contain diverse merchant tools (BHIM, PhonePe, GPay, Paytm, Cred) and physical receipts mention specific card networks (Visa, Mastercard, Amex), the `extract_payment_details` module normalizes these downstream. It strictly maps any found payment application to one of three final `ENUM` states: 
+* `"upi"`
+* `"card"`
+* `"cash"`
+* `"unknown"` (Fallback)
