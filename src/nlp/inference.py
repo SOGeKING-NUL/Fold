@@ -285,4 +285,3 @@ if __name__ == "__main__":
         print(f"INPUT: {sentence}")
         result = extractor.extract(sentence)
         print(f"OUTPUT: {json.dumps(result, indent=2)}")
-"""
