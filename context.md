@@ -140,3 +140,12 @@ Instead of blindly defaulting to "unknown" and corrupting the financial database
 3. **Database Finalization:** Once the user taps the button, the webhook receives the payload and completes the transaction row in the database.
 
 This strategy guarantees 100% data completion while maintaining a frictionless UX.
+
+---
+
+### Update: Framework Decision (PyTorch vs. TensorFlow)
+For the Deep Learning NLP Layer, we are utilizing **PyTorch** via HuggingFace Transformers, deliberately avoiding TensorFlow. The core reasons are:
+
+1. **Ecosystem Dominance:** In modern NLP (especially post-2022 LLMs and Transformer variants), PyTorch has become the undisputed industry standard. Over 90% of state-of-the-art models released on HuggingFace are natively built in PyTorch. Finding TensorFlow implementations of modern Indic-language or Hinglish optimized sequence classifiers is often difficult and prone to bugs.
+2. **Environment Synchronization:** Our STT layer (OpenAI Whisper) natively relies on the `torch` backend. By selecting PyTorch for the NLP DistilBERT classifier, we prevent monolithic environment bloat. If we introduced TensorFlow, the production deployed server would be forced to house *both* massive 2GB+ deep learning frameworks simultaneously, catastrophically increasing RAM footprint and cold-start latency.
+3. **Pythonic Extensibility:** PyTorch's dynamic computational graph structure (`Eager Execution`) feels like standard Python, making it significantly easier to debug model gradients or tweak the internal loss functions during Colab fine-tuning. TensorFlow's static graph architecture (`tf.function` decorators), while great for heavy scale, introduces unnecessary friction for a rapid prototyping stealth financial application.
