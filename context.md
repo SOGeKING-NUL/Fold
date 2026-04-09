@@ -152,35 +152,37 @@ For the Deep Learning NLP Layer, we are utilizing **PyTorch** via HuggingFace Tr
 
 ---
 
-### Update: Model Export & Inference (HuggingFace Integration)
-When the DistilBERT model finishes training and is exported via `save_pretrained()`, it generates a strict set of files. Understanding these is critical for production deployment:
+### Update: Model Export Artifacts & Local Inference
+When extracting the `.zip` file from Google Colab after training `DistilBERT`, you will see a collection of files rather than a single `.exe` or `.dll`. HuggingFace models are purposefully modular. Here is the anatomical breakdown of those artifacts:
 
-#### The File Architecture
-1. **`model.safetensors` (~261 MB):** This is the actual "brain" of the model. It contains millions of mathematical weights (parameters) adjusted during training. HuggingFace uses `.safetensors` instead of the older `.bin` files because it is inherently secure (immune to malicious pickle injection attacks) and heavily optimized for zero-copy loading (loading straight to RAM instantly).
-2. **`config.json`:** The architectural blueprint. It tells the `transformers` library exactly how to structure the neural network (e.g., number of layers, attention heads, and most importantly, your specific Label/Category mapping) *before* it pours the `.safetensors` weights into it.
-3. **`tokenizer.json` & `tokenizer_config.json`:** Neural networks cannot read English characters; they only compute math. These files contain the exact vocabulary library and rules to instantly convert a sentence ("Swiggy se kharcha kiya") into an array of integers (tokens) that perfectly align with the weights in the model.
+#### 1. What are these files?
+* **`model.safetensors`**: The actual "brain" of your model. It contains the exact mathematical weights (the billions of numbers optimized during training). It uses the `.safetensors` format (instead of the older `pytorch_model.bin`) because it is unpickled, making it secure against malicious code injection and significantly faster to load into RAM.
+* **`config.json`**: The architectural blueprint. It tells the Transformers library exactly how to mount the weights (e.g., how many layers, attention heads, and our custom `num_labels` mapping).
+* **`vocab.txt` / `tokenizer.json` / `special_tokens_map.json`**: The translation layer. Deep learning models cannot read text; they look at integers. These files dictate exactly how a Hinglish sentence like "Swiggy se kharcha" gets chopped into sub-word tokens and converted into an array of ID numbers before hitting the tensor weights.
 
-#### How to Use It (Production Inference)
-To use this fine-tuned model in your local Python backend (like FastAPI), you simply point the `transformers` library to the folder containing these 4 files. 
+#### 2. How to use them locally
+You no longer need Google Colab. To deploy this locally inside your backend, you simply place the extracted unzipped folder (e.g., `my_finetuned_distilbert/`) into your `src/nlp/` directory and point the `transformers` library directly at the folder path instead of downloading from the internet:
 
 ```python
 from transformers import AutoTokenizer, AutoModelForSequenceClassification
 import torch
 
-# 1. Load the exported folder
-MODEL_PATH = "./my_finetuned_distilbert"
-tokenizer = AutoTokenizer.from_pretrained(MODEL_PATH)
-model = AutoModelForSequenceClassification.from_pretrained(MODEL_PATH)
+# Simply point to the local directory containing the extracted files!
+LOCAL_MODEL_PATH = "./src/nlp/my_finetuned_distilbert"
 
-# 2. Run Inference
+# Load the local Tokenizer and Model
+tokenizer = AutoTokenizer.from_pretrained(LOCAL_MODEL_PATH)
+model = AutoModelForSequenceClassification.from_pretrained(LOCAL_MODEL_PATH)
+model.eval() # Set to evaluation mode (turns off training node behavior)
+
+# Inference Example
 text = "Bhai Swiggy se pizza mangwaya 450 rupaye ka"
-inputs = tokenizer(text, return_tensors="pt")
+inputs = tokenizer(text, return_tensors="pt", truncation=True, max_length=64)
 
 with torch.no_grad():
     outputs = model(**inputs)
 
-# 3. Map output back to category
 category_id = torch.argmax(outputs.logits, dim=1).item()
-# Assuming your LabelEncoder mapping knows 0=food, 1=shopping, etc.
+# Map 'category_id' back to your string labels (e.g., 0 -> "food")
 ```
-This is the code that will power the `category` classification step within our broader `extract_transaction_info` NLP pipeline.
+This local loading strategy ensures your backend executes inference offline in milliseconds without relying on external internet APIs.
