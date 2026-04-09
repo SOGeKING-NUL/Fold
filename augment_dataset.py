@@ -135,8 +135,8 @@ def generate_outliers(num_outliers=150):
     return outliers
 
 def main():
-    input_file = "test_transactions.csv"
-    output_file = "eda_dataset.csv"
+    input_file = "train_transactions.csv"
+    output_file = "eda_dataset_v2.csv"
 
     rows = []
 
