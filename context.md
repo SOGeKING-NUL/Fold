@@ -149,3 +149,38 @@ For the Deep Learning NLP Layer, we are utilizing **PyTorch** via HuggingFace Tr
 1. **Ecosystem Dominance:** In modern NLP (especially post-2022 LLMs and Transformer variants), PyTorch has become the undisputed industry standard. Over 90% of state-of-the-art models released on HuggingFace are natively built in PyTorch. Finding TensorFlow implementations of modern Indic-language or Hinglish optimized sequence classifiers is often difficult and prone to bugs.
 2. **Environment Synchronization:** Our STT layer (OpenAI Whisper) natively relies on the `torch` backend. By selecting PyTorch for the NLP DistilBERT classifier, we prevent monolithic environment bloat. If we introduced TensorFlow, the production deployed server would be forced to house *both* massive 2GB+ deep learning frameworks simultaneously, catastrophically increasing RAM footprint and cold-start latency.
 3. **Pythonic Extensibility:** PyTorch's dynamic computational graph structure (`Eager Execution`) feels like standard Python, making it significantly easier to debug model gradients or tweak the internal loss functions during Colab fine-tuning. TensorFlow's static graph architecture (`tf.function` decorators), while great for heavy scale, introduces unnecessary friction for a rapid prototyping stealth financial application.
+
+---
+
+### Update: Model Export & Inference (HuggingFace Integration)
+When the DistilBERT model finishes training and is exported via `save_pretrained()`, it generates a strict set of files. Understanding these is critical for production deployment:
+
+#### The File Architecture
+1. **`model.safetensors` (~261 MB):** This is the actual "brain" of the model. It contains millions of mathematical weights (parameters) adjusted during training. HuggingFace uses `.safetensors` instead of the older `.bin` files because it is inherently secure (immune to malicious pickle injection attacks) and heavily optimized for zero-copy loading (loading straight to RAM instantly).
+2. **`config.json`:** The architectural blueprint. It tells the `transformers` library exactly how to structure the neural network (e.g., number of layers, attention heads, and most importantly, your specific Label/Category mapping) *before* it pours the `.safetensors` weights into it.
+3. **`tokenizer.json` & `tokenizer_config.json`:** Neural networks cannot read English characters; they only compute math. These files contain the exact vocabulary library and rules to instantly convert a sentence ("Swiggy se kharcha kiya") into an array of integers (tokens) that perfectly align with the weights in the model.
+
+#### How to Use It (Production Inference)
+To use this fine-tuned model in your local Python backend (like FastAPI), you simply point the `transformers` library to the folder containing these 4 files. 
+
+```python
+from transformers import AutoTokenizer, AutoModelForSequenceClassification
+import torch
+
+# 1. Load the exported folder
+MODEL_PATH = "./my_finetuned_distilbert"
+tokenizer = AutoTokenizer.from_pretrained(MODEL_PATH)
+model = AutoModelForSequenceClassification.from_pretrained(MODEL_PATH)
+
+# 2. Run Inference
+text = "Bhai Swiggy se pizza mangwaya 450 rupaye ka"
+inputs = tokenizer(text, return_tensors="pt")
+
+with torch.no_grad():
+    outputs = model(**inputs)
+
+# 3. Map output back to category
+category_id = torch.argmax(outputs.logits, dim=1).item()
+# Assuming your LabelEncoder mapping knows 0=food, 1=shopping, etc.
+```
+This is the code that will power the `category` classification step within our broader `extract_transaction_info` NLP pipeline.
