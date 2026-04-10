@@ -1,3 +1,552 @@
+# Fold Backend Context (V2)
+
+This is the persistent implementation memory for the current backend state after the Ledger + Telegram V2 upgrade.
+
+## Why V2 Was Built
+
+The earlier backend was expense-only and command-minimal. It could post basic expenses, but it did not support:
+
+- income and investment flows
+- account setup with opening balances
+- account-to-account transfer flows
+- weekly/monthly financial reporting
+- inline Telegram dashboard UX
+- reliable single-transaction journal posting
+
+V2 was implemented to make the backend a proper accounting core instead of a single-use expense logger.
+
+## Core Product Principles
+
+1. Ledger is source of truth for reports.
+2. Double-entry accounting is enforced at write-time.
+3. One currency model (`INR`) for now to reduce complexity.
+4. Telegram is treated as a first-class client, not a thin command relay.
+5. Extraction (OCR/STT/NLP) stays separate from accounting correctness.
+
+## Implemented V2 Areas
+
+### 1) Database Reset + Schema Hardening
+
+File: `src/api/db/connection.py`
+
+What changed:
+
+- Startup migrations now **drop and recreate** finance tables for a clean V2 schema.
+- Added constrained transaction typing:
+  - `expense`, `income`, `investment`, `transfer`, `opening_balance`
+- Added constrained account typing:
+  - `asset`, `liability`, `equity`, `income`, `expense`, `investment`
+- Added `metadata_json` to `journal_transactions` for category/payment annotations.
+- Idempotency uniqueness is now user-scoped (`user_id`, `source`, `external_ref`).
+
+Why:
+
+- Reset was explicitly chosen to avoid carrying old assumptions.
+- Constrained enums prevent silent invalid accounting classes.
+- Metadata allows reporting/breakdowns without denormalizing core tables.
+
+Important operational note:
+
+- Because migrations are destructive, startup recreates tables each run in current V2 mode.
+- This is intentional for current phase but should be changed to versioned migrations before production hardening.
+
+### 2) Atomic Journal Posting Core
+
+Files:
+
+- `src/api/repositories/ledger_repository.py`
+- `src/api/services/ledger_service.py`
+
+What changed:
+
+- Added `create_balanced_journal(...)` that posts journal header + entries in one DB transaction.
+- Added pre-write balancing check (`debits == credits`).
+- Account creation/upsert is integrated inside the same flow.
+
+Why:
+
+- Prevent partial writes across journal and entries.
+- Ensure every posted transaction is accounting-balanced by construction.
+
+### 3) Expanded Ledger API Surface
+
+Files:
+
+- `src/api/schemas.py`
+- `src/api/controllers/ledger_controller.py`
+- `src/api/services/ledger_service.py`
+
+Implemented endpoints:
+
+- `POST /api/v1/ledger/expense`
+- `POST /api/v1/ledger/income`
+- `POST /api/v1/ledger/investment`
+- `POST /api/v1/ledger/transfer`
+- `POST /api/v1/ledger/opening-balance`
+- `POST /api/v1/ledger/accounts`
+- `GET /api/v1/ledger/accounts/{user_ref}`
+- `GET /api/v1/ledger/balances/{user_ref}`
+- `GET /api/v1/ledger/reports/weekly/{user_ref}`
+- `GET /api/v1/ledger/reports/monthly/{user_ref}`
+- `GET /api/v1/ledger/reports/cashflow/{user_ref}`
+- `GET /api/v1/ledger/reports/breakdown/{user_ref}`
+- `GET /api/v1/ledger/transactions/{user_ref}`
+
+Why:
+
+- This maps directly to required product workflows: outgoing, incoming, invested, and moved funds.
+- Reports and history are API-first so Telegram and any future UI can use the same backend contract.
+
+### 4) Reporting Behavior (Ledger-Only)
+
+File: `src/api/repositories/ledger_repository.py`
+
+Implemented:
+
+- Weekly and monthly summary totals:
+  - `income_minor`
+  - `expense_minor`
+  - `investment_minor`
+  - net cashflow
+- Breakdowns by:
+  - account
+  - payment method (from metadata)
+  - category (from metadata)
+- Transaction history listing with pagination controls (`limit`, `offset`).
+
+Why:
+
+- Financial insights must come from posted ledger entries, not model guesses alone.
+- Grouped breakdowns power dashboard style reporting and decision support.
+
+### 5) Telegram Dashboard V2
+
+Files:
+
+- `src/api/services/telegram_service.py`
+- `src/api/controllers/telegram_controller.py`
+- `src/api/repositories/ledger_repository.py` (`telegram_sessions` usage)
+
+What changed:
+
+- `/start` now sends inline dashboard buttons:
+  - Add Expense
+  - Add Income
+  - Add Investment
+  - Transfer
+  - Weekly Report
+  - Monthly Report
+  - Balance Snapshot
+  - Accounts
+- Callback routing implemented for dashboard/report/account actions.
+- Session storage now used to persist funding-account preference for expenses.
+- Backward-compatible text commands retained:
+  - `/expense`
+  - `/income`
+  - `/investment`
+  - `/transfer`
+  - `/opening`
+  - `/balance`
+
+Why:
+
+- Inline dashboard reduces command memorization friction.
+- Session-backed account preference allows practical multi-account spend routing.
+
+## Accounting Templates Implemented
+
+Inside `LedgerService`:
+
+- Expense:
+  - debit expense account
+  - credit funding account
+- Income:
+  - debit destination asset
+  - credit income account
+- Investment:
+  - debit investment account
+  - credit funding account
+- Transfer:
+  - debit destination account
+  - credit source account
+- Opening balance:
+  - debit target account
+  - credit opening equity account
+
+Why:
+
+- These templates encode domain intent while preserving strict double-entry mechanics.
+
+## Data Flow Overview
+
+```mermaid
+flowchart TD
+  telegramUser[TelegramUser] --> webhook[/api/v1/webhooks/telegram]
+  webhook --> telegramSvc[TelegramService]
+  telegramSvc --> sessions[(telegram_sessions)]
+  telegramSvc --> ledgerSvc[LedgerService]
+  ledgerSvc --> ledgerRepo[LedgerRepository]
+  ledgerRepo --> db[(Postgres)]
+
+  apiClient[APIClient] --> ledgerApi[/api/v1/ledger/*]
+  ledgerApi --> ledgerSvc
+```
+
+## Validation Performed During V2 Implementation
+
+- Health endpoint check (`/health`) succeeded.
+- Ledger endpoint smoke tests succeeded:
+  - account creation
+  - expense posting
+  - weekly/monthly report fetch
+  - breakdown and transactions fetch
+- Telegram webhook smoke test succeeded with valid secret token:
+  - `/start` payload accepted and handled.
+
+## What Still Needs Next Iteration
+
+1. Move from destructive startup migration to versioned migrations.
+2. Add explicit account-type mapping for `/transfer` command parsing in Telegram (currently defaults to asset in quick command path).
+3. Add richer multi-step Telegram setup wizard for creating custom accounts and opening balances via buttons/forms only.
+4. Add stronger idempotency and replay protections for webhook updates (`ingestion_events` integration not fully wired).
+5. Add integration tests for all journal template paths and report filters.
+
+## Non-Goals (Still Deferred)
+
+- Multi-currency accounting.
+- Full media-auto ingestion in Telegram for photo/voice posting into ledger automatically.
+- Advanced forecasting or ML-based budgeting.
+
+# Fold Backend Context and Engineering Memory
+
+This document is the persistent implementation memory for the Fold backend. It explains not only what is implemented, but why those choices were made, where behavior currently lives in code, and what is intentionally not implemented yet.
+
+## Project Intent
+
+Fold is building a multi-input expense capture backend optimized for Indian/Hinglish usage. The system ingests text, voice, and receipt images, extracts transaction fields, and posts accounting-safe ledger entries.
+
+Design philosophy:
+
+- Use strong off-the-shelf models for perception (OCR/STT).
+- Keep the orchestration and data guarantees in our backend.
+- Standardize output shape across modalities so downstream systems stay simple.
+
+## Current Backend Surface (What Exists)
+
+Main app entrypoint: `src/api/main.py`
+
+Routers currently mounted:
+
+- `src/api/routes.py` -> `/api/v1` extraction + correction APIs
+- `src/api/controllers/ledger_controller.py` -> `/api/v1/ledger/*`
+- `src/api/controllers/telegram_controller.py` -> `/api/v1/webhooks/telegram`
+
+Health endpoint:
+
+- `GET /health` returns service status.
+
+Startup behavior:
+
+- `run_migrations()` executes on startup from `src/api/db/connection.py`.
+- Tables are auto-created if missing.
+
+## Environment and Config Decisions
+
+Config source: `src/api/config.py`
+
+Required env variables:
+
+- `DATABASE_URL`
+- `TELE_BOT_HTTP_API`
+
+Optional but strongly recommended:
+
+- `TELEGRAM_WEBHOOK_SECRET`
+
+Why this approach:
+
+- Keep deployment and local dev simple with `.env` fallback loading.
+- Hard-fail when DB/token are absent to avoid silent runtime partial states.
+- Make webhook secret optional to reduce local setup friction, but enforce when set.
+
+## Unified Extraction Contract (Core API Design)
+
+Extraction APIs return a common response (`TransactionResponse` in `src/api/schemas.py`) with:
+
+- `status`
+- `source`
+- `data` containing:
+  - `text_transcript`
+  - `amount`
+  - `category`
+  - `payment_method`
+  - `bank_account`
+
+Why this was implemented:
+
+- Downstream services (ledger/chat/analytics) should not care whether source was text, audio, or image.
+- One schema allows easier testing in `/docs`, cleaner clients, and fewer branching bugs.
+
+## Text Pipeline (`POST /api/v1/extract/text`)
+
+Implementation: `src/api/routes.py`
+
+Flow:
+
+- Input text goes directly to `TransactionExtractor.extract()`.
+- Returns normalized structured fields.
+
+Why:
+
+- Text path is the baseline and fastest path.
+- It is used for both direct client integration and fallback debug/testing.
+
+## Audio Pipeline (`POST /api/v1/extract/audio`)
+
+Implementation: `src/api/routes.py` + `src/stt/transcriber.py`
+
+Flow:
+
+1. Upload is written to a temp file.
+2. Whisper transcribes audio (`VoiceTranscriber` with model `small`).
+3. Transcript is passed into NLP extractor.
+4. Temp file is deleted in success and error paths.
+
+Why:
+
+- Temp files are required because Whisper/FFmpeg decode from file path reliably.
+- Deleting temp files avoids disk growth and accidental PII persistence.
+- STT only returns transcript by design; NLP owns extraction logic so business parsing stays centralized.
+
+## Image Pipeline (`POST /api/v1/extract/image`)
+
+Implementation: `src/api/routes.py` + `src/ocr/extractor.py` + NLP module
+
+Flow:
+
+1. Uploaded image saved to temp file.
+2. OCR runs (`ReceiptOCR.process_receipt`).
+3. OCR gives `all_lines`, `key_lines`, and parsed amount/payment guess.
+4. Full OCR text wall is fed to NLP for category and fallback extraction.
+5. Merge policy:
+   - amount: OCR first, NLP fallback
+   - payment_method: OCR first; if OCR=`unknown`, NLP fallback
+   - category: NLP
+6. Temp image file is deleted.
+
+Why this hybrid merge exists:
+
+- OCR is strongest for visually explicit totals and mode clues on receipts.
+- NLP is stronger for semantic category inference from noisy text.
+- Hybrid arbitration reduces false positives from any single subsystem.
+
+## How Images Are Saved (Current Behavior)
+
+Current behavior in API routes:
+
+- Images are not permanently stored by backend.
+- They are written to an OS temp path for processing only.
+- Temp files are removed before response completion.
+
+Implication:
+
+- There is no built-in image archive/history in DB or filesystem.
+- If persistent media storage is needed, that is a future feature (object storage + retention policy).
+
+## OCR Architecture Rationale
+
+Implementation: `src/ocr/extractor.py`
+
+Key mechanisms:
+
+- Optional preprocessing pipeline exists (upscale/CLAHE/denoise/sharpen/binarize).
+- Spatial sorting reconstructs lines from OCR bounding boxes.
+- Heuristic filtering isolates key financial lines.
+- Amount extraction prioritizes total-like lines; payment mode normalization maps to `upi`, `card`, `cash`, `unknown`.
+
+Why this is implemented:
+
+- Raw OCR output is unordered word fragments.
+- Financial extraction requires structure reconstruction, not just plain text dumping.
+- Payment normalization supports consistent downstream enums.
+
+Current nuance:
+
+- Route currently calls `use_preprocessing=False` for image extraction.
+- This reflects practical preference for raw image OCR behavior in current flow.
+
+## STT Architecture Rationale
+
+Implementation: `src/stt/transcriber.py`
+
+Key mechanisms:
+
+- Whisper local model (`small`) loaded once.
+- Hindi language mode with Hinglish domain prompt anchoring.
+- Output is transcript only.
+
+Why:
+
+- Whisper handles code-switching well enough for this use case.
+- Domain prompt reduces bad lexical drift/hallucinated phrasing.
+- Keeping STT focused on transcription prevents duplicated parsing logic across modules.
+
+## NLP Architecture Rationale
+
+Implementation: `src/nlp/inference.py`
+
+Core extraction strategy:
+
+- Category:
+  - first check `category_overrides.json` user memory
+  - otherwise run DistilBERT classifier
+  - if outlier label, fallback to default category
+- Amount:
+  - Hindi multiplier words
+  - currency-tagged regex
+  - largest-number fallback
+- Payment method:
+  - dictionary match for UPI/Card/Cash terms
+- Bank account:
+  - dictionary match on known Indian bank names
+
+Why:
+
+- Real user utterances are noisy and multilingual.
+- Model-only extraction is brittle without override memory.
+- Rule+model hybrid provides practical robustness in small-data environments.
+
+## Category Correction Memory (`POST /api/v1/correct`)
+
+Implemented as a persistent override map in `category_overrides.json`.
+
+Why:
+
+- User corrections are high-value signal.
+- Persisting corrections creates compounding accuracy improvements without retraining.
+
+## Ledger System (Double-Entry Backbone)
+
+Implementation:
+
+- Controller: `src/api/controllers/ledger_controller.py`
+- Service: `src/api/services/ledger_service.py`
+- Repository: `src/api/repositories/ledger_repository.py`
+- DB schema: `src/api/db/connection.py`
+
+Current capabilities:
+
+- Post expense (`POST /api/v1/ledger/expense`)
+- Fetch balances (`GET /api/v1/ledger/balances/{user_ref}`)
+
+Ledger write logic:
+
+- Converts amount to minor units.
+- Ensures user and default accounts exist.
+- Writes one journal transaction.
+- Writes two ledger entries (debit + credit).
+
+Why:
+
+- Double-entry model keeps accounting integrity and auditability.
+- Minor unit storage avoids float precision drift.
+
+Known design caveat:
+
+- Funding account is created with `account_type="asset"` in service logic, even when code may imply liabilities (e.g., `card_liability`). This should be revisited for strict accounting semantics.
+
+## Telegram Webhook Integration
+
+Implementation:
+
+- Controller: `src/api/controllers/telegram_controller.py`
+- Service: `src/api/services/telegram_service.py`
+- Secret middleware: `src/api/middleware/telegram_security.py`
+
+Security model:
+
+- If `TELEGRAM_WEBHOOK_SECRET` is configured, webhook requires matching `X-Telegram-Bot-Api-Secret-Token`.
+
+Current bot command support:
+
+- `/start`, `/add` -> sends payment method inline keyboard
+- `/expense <amount> <description>` -> posts ledger expense
+- `/balance` -> returns balances
+- callback `pay:*` -> confirmation message
+
+Why this narrow command scope:
+
+- Fastest path to validate webhook + ledger loop.
+- Keeps conversational state complexity low in current iteration.
+
+## Media Auto-Detection in Telegram (Current State)
+
+Not implemented yet.
+
+What exists now:
+
+- Telegram handler checks `update["message"]["text"]` and `callback_query`.
+- No handling for `photo`, `document`, `voice`, or media download via Telegram file APIs.
+
+So, if a user "just sends an image" to bot today:
+
+- It will not trigger the OCR extraction pipeline automatically.
+- The message falls through to help/ignored behavior depending on payload shape.
+
+## Database Tables Currently Auto-Migrated
+
+From `run_migrations()`:
+
+- `users`
+- `accounts`
+- `journal_transactions`
+- `ledger_entries`
+- `telegram_sessions`
+- `ingestion_events`
+
+Why include more than current active paths:
+
+- `telegram_sessions` and `ingestion_events` provide a foundation for idempotency/stateful chat expansion and source event tracking.
+
+## `/docs` Testing Philosophy
+
+The OpenAPI docs are intended as a first-line system verification surface.
+
+Recommended checks:
+
+1. `GET /health`
+2. Extraction endpoints (`text`, `audio`, `image`)
+3. Ledger write + read endpoints
+4. Telegram webhook behavior via real Telegram updates (not synthetic docs call only)
+
+Why:
+
+- This sequence validates model loading, file handling, DB writes, and orchestration in realistic order.
+
+## Known Gaps and Next High-Value Steps
+
+1. Telegram media ingestion:
+   - add handlers for `voice` and `photo`
+   - fetch media with Telegram `getFile` + file download
+   - route to existing `/extract/audio` and `/extract/image` pipeline logic
+2. Persistent media strategy:
+   - optional object storage path for receipts/audio with retention controls
+3. Accounting semantics:
+   - preserve true account type on custom funding codes
+4. Error envelopes:
+   - standardize all errors to `ErrorResponse`
+5. Observability:
+   - structured logs and per-stage latency timing (OCR, STT, NLP, DB)
+
+## Non-Goals in Current Build
+
+- Full conversational agent state machine
+- Human-in-the-loop reconciliation dashboard
+- Long-term media archival
+- Multi-tenant auth and RBAC
+
+These are intentionally deferred to keep the core extraction + ledger loop stable first.
+
 That is a **100% correct and highly efficient** engineering strategy. By using "off-the-shelf" models for the heavy lifting (OCR and Speech-to-Text) and focusing your "from scratch" effort on the **NLP Intent Layer**, you’re following the 80/20 rule of AI development.
 
 Building a custom OCR or STT engine is a multi-year research project. Building a custom Hinglish Transaction Classifier is a high-value, specialized weekend-to-month project.
