@@ -26,6 +26,9 @@ if SRC_DIR not in sys.path:
 
 from fastapi import FastAPI
 from api.routes import router
+from api.controllers.ledger_controller import router as ledger_router
+from api.controllers.telegram_controller import router as telegram_router
+from api.db.connection import run_migrations
 
 # ─── Create Application ─────────────────────────────────────────────────
 app = FastAPI(
@@ -40,6 +43,13 @@ app = FastAPI(
 
 # ─── Register Routes ────────────────────────────────────────────────────
 app.include_router(router)
+app.include_router(ledger_router)
+app.include_router(telegram_router)
+
+
+@app.on_event("startup")
+def startup_event():
+    run_migrations()
 
 
 # ─── Health Check ────────────────────────────────────────────────────────
