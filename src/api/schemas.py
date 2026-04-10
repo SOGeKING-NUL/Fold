@@ -48,3 +48,24 @@ class CorrectionRequest(BaseModel):
     """Request body for the /correct endpoint (category override)."""
     keyword: str
     correct_category: str
+
+
+class LedgerPostRequest(BaseModel):
+    user_ref: str
+    amount: float
+    description: str
+    expense_account_code: str = "expense_misc"
+    funding_account_code: str = "upi_wallet"
+    source: str = "manual"
+    external_ref: Optional[str] = None
+
+
+class LedgerPostResponse(BaseModel):
+    status: Literal["success"] = "success"
+    result: dict
+
+
+class LedgerBalanceResponse(BaseModel):
+    status: Literal["success"] = "success"
+    user_ref: str
+    balances: list[dict]
