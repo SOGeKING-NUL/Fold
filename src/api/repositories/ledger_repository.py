@@ -1,3 +1,5 @@
+import re
+
 from psycopg.rows import dict_row
 from psycopg.types.json import Json
 
@@ -26,25 +28,47 @@ class LedgerRepository:
             )
             return cur.fetchone()
 
-    def get_or_create_account(self, user_id: int, code: str, name: str, account_type: str, conn=None) -> dict:
+    def get_or_create_account(
+        self,
+        user_id: int,
+        code: str,
+        name: str,
+        account_type: str,
+        institution_name: str | None = None,
+        account_number_last4: str | None = None,
+        is_digital: bool = False,
+        conn=None,
+    ) -> dict:
         owns_conn = conn is None
         if owns_conn:
             with get_db_connection() as own_conn:
-                result = self.get_or_create_account(user_id, code, name, account_type, conn=own_conn)
+                result = self.get_or_create_account(
+                    user_id,
+                    code,
+                    name,
+                    account_type,
+                    institution_name=institution_name,
+                    account_number_last4=account_number_last4,
+                    is_digital=is_digital,
+                    conn=own_conn,
+                )
                 own_conn.commit()
                 return result
 
         with conn.cursor(row_factory=dict_row) as cur:
             cur.execute(
                 """
-                INSERT INTO accounts (user_id, code, name, account_type)
-                VALUES (%s, %s, %s, %s)
+                INSERT INTO accounts (user_id, code, name, account_type, institution_name, account_number_last4, is_digital)
+                VALUES (%s, %s, %s, %s, %s, %s, %s)
                 ON CONFLICT (user_id, code) DO UPDATE
                 SET name = EXCLUDED.name,
-                    account_type = EXCLUDED.account_type
+                    account_type = EXCLUDED.account_type,
+                    institution_name = COALESCE(EXCLUDED.institution_name, accounts.institution_name),
+                    account_number_last4 = COALESCE(EXCLUDED.account_number_last4, accounts.account_number_last4),
+                    is_digital = EXCLUDED.is_digital
                 RETURNING *
                 """,
-                (user_id, code, name, account_type),
+                (user_id, code, name, account_type, institution_name, account_number_last4, is_digital),
             )
             return cur.fetchone()
 
@@ -79,6 +103,203 @@ class LedgerRepository:
                     (external_user_ref,),
                 )
                 return cur.fetchall()
+
+    def has_onboarding_account(self, external_user_ref: str) -> bool:
+        with get_db_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT EXISTS (
+                        SELECT 1
+                        FROM users u
+                        JOIN accounts a ON a.user_id = u.id
+                        WHERE u.external_user_ref = %s
+                          AND a.account_type IN ('asset', 'liability')
+                          AND a.account_number_last4 IS NOT NULL
+                          AND length(a.account_number_last4) = 4
+                    )
+                    """,
+                    (external_user_ref,),
+                )
+                row = cur.fetchone()
+                return bool(row and row[0])
+
+    def get_user_preferences(self, external_user_ref: str) -> dict:
+        with get_db_connection() as conn:
+            with conn.cursor(row_factory=dict_row) as cur:
+                cur.execute(
+                    "SELECT preferences_json FROM users WHERE external_user_ref = %s",
+                    (external_user_ref,),
+                )
+                row = cur.fetchone()
+                if not row:
+                    return {}
+                pj = row.get("preferences_json")
+                if pj is None:
+                    return {}
+                return dict(pj) if isinstance(pj, dict) else {}
+
+    def merge_user_preferences(self, external_user_ref: str, patch: dict) -> None:
+        with get_db_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    UPDATE users
+                    SET preferences_json = COALESCE(preferences_json, '{}'::jsonb) || %s::jsonb
+                    WHERE external_user_ref = %s
+                    """,
+                    (Json(patch), external_user_ref),
+                )
+            conn.commit()
+
+    def list_real_funding_accounts(self, external_user_ref: str) -> list[dict]:
+        """Asset/liability accounts the user set up with a 4-digit last4 (actual cards/banks)."""
+        with get_db_connection() as conn:
+            with conn.cursor(row_factory=dict_row) as cur:
+                cur.execute(
+                    """
+                    SELECT a.code, a.name, a.account_type
+                    FROM users u
+                    JOIN accounts a ON a.user_id = u.id
+                    WHERE u.external_user_ref = %s
+                      AND a.account_type IN ('asset', 'liability')
+                      AND a.account_number_last4 IS NOT NULL
+                      AND length(trim(a.account_number_last4)) = 4
+                      AND a.is_active = TRUE
+                    ORDER BY a.code
+                    """,
+                    (external_user_ref,),
+                )
+                return list(cur.fetchall())
+
+    def try_claim_telegram_update(self, update_id: int) -> bool:
+        """
+        Return True if this Telegram update_id is new and was recorded.
+        Return False on replay (webhook retry) so handlers do not send duplicate messages.
+        """
+        if update_id <= 0:
+            return True
+        with get_db_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    INSERT INTO ingestion_events (source, external_event_id, payload_json)
+                    VALUES ('telegram_update', %s, '{}'::jsonb)
+                    ON CONFLICT (source, external_event_id) DO NOTHING
+                    RETURNING id
+                    """,
+                    (str(update_id),),
+                )
+                row = cur.fetchone()
+            conn.commit()
+        return row is not None
+
+    def create_or_update_payment_profile(
+        self,
+        *,
+        user_ref: str,
+        profile_type: str,
+        provider: str,
+        profile_name: str,
+        handle_ref: str | None,
+        linked_account_code: str,
+    ) -> dict:
+        with get_db_connection() as conn:
+            user = self.get_or_create_user(user_ref, conn=conn)
+            user_id = int(user["id"])
+            linked_account = self.get_account_by_code(user_id=user_id, code=linked_account_code, conn=conn)
+            if not linked_account:
+                raise ValueError(f"Account not found: {linked_account_code}")
+
+            with conn.cursor(row_factory=dict_row) as cur:
+                cur.execute(
+                    """
+                    INSERT INTO payment_profiles (
+                        user_id, profile_type, provider, profile_name, handle_ref, linked_account_id, is_active
+                    )
+                    VALUES (%s, %s, %s, %s, %s, %s, TRUE)
+                    ON CONFLICT (user_id, profile_type, provider, profile_name) DO UPDATE
+                    SET handle_ref = EXCLUDED.handle_ref,
+                        linked_account_id = EXCLUDED.linked_account_id,
+                        is_active = TRUE
+                    RETURNING *
+                    """,
+                    (user_id, profile_type, provider.lower(), profile_name, handle_ref, int(linked_account["id"])),
+                )
+                profile = cur.fetchone()
+            conn.commit()
+            return profile
+
+    def list_payment_profiles(self, user_ref: str) -> list[dict]:
+        with get_db_connection() as conn:
+            with conn.cursor(row_factory=dict_row) as cur:
+                cur.execute(
+                    """
+                    SELECT
+                        pp.id,
+                        pp.profile_type,
+                        pp.provider,
+                        pp.profile_name,
+                        pp.handle_ref,
+                        pp.is_active,
+                        a.code AS linked_account_code
+                    FROM users u
+                    JOIN payment_profiles pp ON pp.user_id = u.id
+                    LEFT JOIN accounts a ON a.id = pp.linked_account_id
+                    WHERE u.external_user_ref = %s
+                    ORDER BY pp.provider, pp.profile_name
+                    """,
+                    (user_ref,),
+                )
+                return cur.fetchall()
+
+    def resolve_linked_account_for_provider(self, user_ref: str, profile_type: str, provider: str) -> dict | None:
+        with get_db_connection() as conn:
+            with conn.cursor(row_factory=dict_row) as cur:
+                cur.execute(
+                    """
+                    SELECT
+                        a.code,
+                        a.account_type,
+                        pp.provider,
+                        pp.profile_name
+                    FROM users u
+                    JOIN payment_profiles pp ON pp.user_id = u.id
+                    JOIN accounts a ON a.id = pp.linked_account_id
+                    WHERE u.external_user_ref = %s
+                      AND pp.profile_type = %s
+                      AND pp.provider = %s
+                      AND pp.is_active = TRUE
+                    ORDER BY pp.id DESC
+                    LIMIT 1
+                    """,
+                    (user_ref, profile_type, provider.lower()),
+                )
+                return cur.fetchone()
+
+    def get_account_balance_minor(self, user_ref: str, account_code: str) -> int:
+        """Current balance (in minor units) for one account, using normal debit/credit sign rules."""
+        with get_db_connection() as conn:
+            with conn.cursor(row_factory=dict_row) as cur:
+                cur.execute(
+                    """
+                    SELECT COALESCE(SUM(
+                        CASE
+                            WHEN a.account_type IN ('asset', 'expense', 'investment')
+                                THEN CASE WHEN le.direction = 'debit' THEN le.amount_minor ELSE -le.amount_minor END
+                            ELSE CASE WHEN le.direction = 'credit' THEN le.amount_minor ELSE -le.amount_minor END
+                        END
+                    ), 0) AS balance_minor
+                    FROM users u
+                    JOIN accounts a ON a.user_id = u.id
+                    LEFT JOIN ledger_entries le ON le.account_id = a.id
+                    WHERE u.external_user_ref = %s AND a.code = %s
+                    GROUP BY a.id
+                    """,
+                    (user_ref, account_code),
+                )
+                row = cur.fetchone()
+                return int(row["balance_minor"]) if row else 0
 
     def create_balanced_journal(
         self,
@@ -291,3 +512,127 @@ class LedgerRepository:
                     (telegram_user_id, state, Json(payload)),
                 )
             conn.commit()
+
+    def upsert_pending_expense_media(
+        self,
+        telegram_user_id: int,
+        media_kind: str,
+        mime_type: str | None,
+        file_bytes: bytes,
+    ) -> None:
+        if media_kind not in ("image", "audio"):
+            raise ValueError("media_kind must be image or audio")
+        with get_db_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    INSERT INTO telegram_expense_pending_media (telegram_user_id, media_kind, mime_type, file_bytes)
+                    VALUES (%s, %s, %s, %s)
+                    ON CONFLICT (telegram_user_id) DO UPDATE
+                    SET media_kind = EXCLUDED.media_kind,
+                        mime_type = EXCLUDED.mime_type,
+                        file_bytes = EXCLUDED.file_bytes,
+                        updated_at = NOW()
+                    """,
+                    (telegram_user_id, media_kind, mime_type, file_bytes),
+                )
+            conn.commit()
+
+    def fetch_pending_expense_media(self, telegram_user_id: int) -> dict | None:
+        with get_db_connection() as conn:
+            with conn.cursor(row_factory=dict_row) as cur:
+                cur.execute(
+                    """
+                    SELECT telegram_user_id, media_kind, mime_type, file_bytes, updated_at
+                    FROM telegram_expense_pending_media
+                    WHERE telegram_user_id = %s
+                    """,
+                    (telegram_user_id,),
+                )
+                return cur.fetchone()
+
+    def delete_pending_expense_media(self, telegram_user_id: int) -> None:
+        with get_db_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "DELETE FROM telegram_expense_pending_media WHERE telegram_user_id = %s",
+                    (telegram_user_id,),
+                )
+            conn.commit()
+
+    def insert_journal_media(
+        self,
+        journal_transaction_id: int,
+        media_kind: str,
+        mime_type: str | None,
+        file_bytes: bytes,
+    ) -> dict:
+        if media_kind not in ("image", "audio"):
+            raise ValueError("media_kind must be image or audio")
+        with get_db_connection() as conn:
+            with conn.cursor(row_factory=dict_row) as cur:
+                cur.execute(
+                    """
+                    INSERT INTO journal_media (journal_transaction_id, media_kind, mime_type, file_bytes)
+                    VALUES (%s, %s, %s, %s)
+                    RETURNING id, journal_transaction_id, media_kind, mime_type, created_at
+                    """,
+                    (journal_transaction_id, media_kind, mime_type, file_bytes),
+                )
+                row = cur.fetchone()
+            conn.commit()
+            return dict(row)
+
+    def reassign_expense_journal_category(
+        self, *, user_ref: str, journal_transaction_id: int, new_category: str
+    ) -> dict:
+        """
+        Update the category stored in metadata_json for an expense journal.
+        Ledger entries stay on the pooled expense_operating account; only the tag changes.
+        """
+        valid = frozenset(
+            {
+                "education",
+                "emi",
+                "entertainment",
+                "food",
+                "healthcare",
+                "investment",
+                "shopping",
+                "travel",
+                "utilities",
+                "misc",
+                "friends",
+            }
+        )
+        cat = new_category.lower().strip()
+        if cat not in valid:
+            raise ValueError(f"Invalid category '{new_category}'.")
+
+        with get_db_connection() as conn:
+            with conn.cursor(row_factory=dict_row) as cur:
+                cur.execute(
+                    """
+                    SELECT jt.id, jt.transaction_type
+                    FROM journal_transactions jt
+                    JOIN users u ON u.id = jt.user_id
+                    WHERE u.external_user_ref = %s AND jt.id = %s
+                    """,
+                    (user_ref, journal_transaction_id),
+                )
+                jt = cur.fetchone()
+                if not jt:
+                    raise ValueError("Journal not found.")
+                if jt["transaction_type"] != "expense":
+                    raise ValueError("Only expense journals can be recategorized this way.")
+
+                cur.execute(
+                    """
+                    UPDATE journal_transactions
+                    SET metadata_json = COALESCE(metadata_json, '{}'::jsonb) || %s::jsonb
+                    WHERE id = %s
+                    """,
+                    (Json({"category": cat, "category_user_corrected": True}), journal_transaction_id),
+                )
+            conn.commit()
+        return {"journal_id": journal_transaction_id, "category": cat}
