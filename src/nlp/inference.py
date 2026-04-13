@@ -23,6 +23,9 @@ import os
 import torch
 from transformers import AutoTokenizer, AutoModelForSequenceClassification
 
+from ocr.amount_plausibility import plausible_inr_amount
+from ocr.cash_flow import detect_cash_flow_from_text
+
 
 # ─── Constants ───────────────────────────────────────────────────────────
 
@@ -54,10 +57,11 @@ LABEL_MAP = {
     14: "utilities",
 }
 
-# Valid categories (excluding EDA noise labels)
+# Valid categories (excluding EDA noise labels). "friends" needs a model retrain to be predicted;
+# until then, use category_overrides or Telegram "Change category".
 VALID_CATEGORIES = {
-    "education", "emi", "entertainment", "food",
-    "healthcare", "investment", "shopping", "travel", "utilities"
+    "education", "emi", "entertainment", "food", "friends",
+    "healthcare", "investment", "shopping", "travel", "utilities",
 }
 
 FALLBACK_CATEGORY = "shopping"  # Default if model predicts an outlier label
@@ -70,9 +74,26 @@ INDIAN_BANKS = [
 ]
 
 # ─── Payment Method Keywords ────────────────────────────────────────────
-UPI_KEYWORDS = ["upi", "gpay", "paytm", "phonepe", "bhim", "cred", "bharatpe"]
+UPI_KEYWORDS = ["upi", "gpay", "google pay", "paytm", "phonepe", "phone pe", "bhim", "cred", "bharatpe"]
 CARD_KEYWORDS = ["card", "visa", "mastercard", "amex", "debit", "credit"]
 CASH_KEYWORDS = ["cash", "naqad", "nakd", "naqdi"]
+
+# ─── UPI Provider Mapping (keyword → canonical provider name) ───────────
+UPI_PROVIDER_MAP: dict[str, str] = {
+    "gpay": "gpay",
+    "google pay": "gpay",
+    "g pay": "gpay",
+    "phonepe": "phonepe",
+    "phone pe": "phonepe",
+    "paytm": "paytm",
+    "bhim": "bhim",
+    "cred": "cred",
+    "bharatpe": "bharatpe",
+    "amazon pay": "amazonpay",
+    "amazonpay": "amazonpay",
+    "freecharge": "freecharge",
+    "mobikwik": "mobikwik",
+}
 
 # ─── Hindi Amount Multipliers ───────────────────────────────────────────
 HINDI_MULTIPLIERS = {
@@ -177,7 +198,9 @@ class TransactionExtractor:
         for word, factor in HINDI_MULTIPLIERS.items():
             match = re.search(rf'(\d+\.?\d*)\s*{word}', lower)
             if match:
-                return float(match.group(1)) * factor
+                amt = float(match.group(1)) * factor
+                if plausible_inr_amount(amt):
+                    return amt
 
         # Layer 2: Currency-tagged numbers
         currency_match = re.findall(
@@ -190,13 +213,15 @@ class TransactionExtractor:
             for group in currency_match:
                 for val in group:
                     if val:
-                        return float(val.replace(',', ''))
+                        amt = float(val.replace(',', ''))
+                        if plausible_inr_amount(amt):
+                            return amt
 
-        # Layer 3: Bare number fallback (largest number ≥ 10)
+        # Layer 3: Bare number fallback (largest number ≥ 10), excluding ref-id-sized integers
         numbers = re.findall(r'\b(\d[\d,]*\.?\d*)\b', lower)
         if numbers:
             parsed = [float(n.replace(',', '')) for n in numbers]
-            large = [n for n in parsed if n >= 10]
+            large = [n for n in parsed if n >= 10 and plausible_inr_amount(n)]
             if large:
                 return max(large)
 
@@ -219,6 +244,20 @@ class TransactionExtractor:
         if any(kw in lower for kw in CASH_KEYWORDS):
             return "cash"
 
+        return None
+
+    # ─── UPI Provider Extraction ────────────────────────────────────
+
+    @staticmethod
+    def _extract_payment_provider(text: str) -> str | None:
+        """
+        If a UPI app name is found in text, return the canonical provider
+        slug (gpay, phonepe, paytm, …). Returns None when no app is mentioned.
+        """
+        lower = text.lower()
+        for keyword, provider in UPI_PROVIDER_MAP.items():
+            if keyword in lower:
+                return provider
         return None
 
     # ─── Bank Account Extraction ────────────────────────────────────
@@ -249,14 +288,18 @@ class TransactionExtractor:
                 "amount": float | None,
                 "category": str,
                 "payment_method": str | None,
-                "bank_account": str | None
+                "payment_provider": str | None,
+                "bank_account": str | None,
+                "cash_flow": expense, income, or None (from phrases like paid to / received from),
             }
         """
         return {
             "amount": self._extract_amount(text),
             "category": self._predict_category(text),
             "payment_method": self._extract_payment_method(text),
+            "payment_provider": self._extract_payment_provider(text),
             "bank_account": self._extract_bank(text),
+            "cash_flow": detect_cash_flow_from_text(text),
         }
 
 
