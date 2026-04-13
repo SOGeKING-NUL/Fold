@@ -3,6 +3,9 @@ import numpy as np
 from paddleocr import PaddleOCR
 import re
 
+from ocr.amount_plausibility import plausible_inr_amount
+from ocr.cash_flow import detect_cash_flow_from_text
+
 
 class ReceiptOCR:
     def __init__(self, lang='en'):
@@ -177,29 +180,48 @@ class ReceiptOCR:
 
     # ─── Data Extraction ────────────────────────────────────────────────
 
-    def extract_payment_details(self, key_lines: list) -> dict:
+    # Provider keyword → canonical slug (same as NLP layer for consistency)
+    _UPI_PROVIDER_MAP: dict[str, str] = {
+        "gpay": "gpay", "google pay": "gpay", "g pay": "gpay",
+        "phonepe": "phonepe", "phone pe": "phonepe",
+        "paytm": "paytm", "bhim": "bhim", "cred": "cred",
+        "bharatpe": "bharatpe", "amazon pay": "amazonpay",
+        "amazonpay": "amazonpay", "freecharge": "freecharge",
+        "mobikwik": "mobikwik",
+    }
+
+    def extract_payment_details(self, key_lines: list, all_lines: list | None = None) -> dict:
         """
         Parses the filtered key lines to extract the final payment amount
         by strictly associating it with explicit finality keywords instead of max().
+        Also scans all OCR lines for a UPI provider name.
         """
         final_amount = None
         payment_method = "unknown"
-        
-        # Keywords that strongly indicate the line holds the final transaction amount
+        payment_provider: str | None = None
+
         total_keywords = ["grand total", "total", "payable", "cash", "net amount", "amount paid", "balance", "net", "paid", "sent", "successful"]
-        
-        found_amounts = []
-        all_fallback_amounts = []
-        
+
+        found_amounts: list[float] = []
+        all_fallback_amounts: list[float] = []
+
+        upi_keywords = ["upi", "gpay", "google pay", "paytm", "bhim", "phonepe", "phone pe", "bharatpe", "cred"]
+        card_keywords = ["card", "visa", "mastercard", "amex"]
+        cash_keywords = ["cash"]
+
+        scan_lines = list(key_lines)
+        if all_lines:
+            scan_lines = list(all_lines)
+
+        for line in scan_lines:
+            lower_line = line.lower()
+            for kw, prov in self._UPI_PROVIDER_MAP.items():
+                if kw in lower_line and payment_provider is None:
+                    payment_provider = prov
+
         for line in key_lines:
             lower_line = line.lower()
-            
-            # Extract Payment Mode and map to core 3 types (cash, card, upi)
-            # Map specific keywords to their parent categories
-            upi_keywords = ["upi", "gpay", "paytm", "bhim", "phonepe", "bharatpe", "cred"]
-            card_keywords = ["card", "visa", "mastercard", "amex"]
-            cash_keywords = ["cash"]
-            
+
             for kw in upi_keywords:
                 if kw in lower_line:
                     payment_method = "upi"
@@ -210,38 +232,43 @@ class ReceiptOCR:
                 if kw in lower_line:
                     payment_method = "cash"
 
-            # Find all strict float numbers on this line (allowing preceding letters/symbols like R500 or ₹500 removing the \b boundary constraint)
             matches = re.findall(r'(?<!\d)\d{1,3}(?:,\d{3})*(?:\.\d{2})\b|(?<!\d)\d+\.\d{2}\b', line)
-            
-            # If no strict decimals, search for integer amounts explicitly tagged with currency
+
             if not matches:
                 curr_matches = re.findall(r'(?:\b(?:rs\.?|inr|r)|[₹$])\s*(\d{1,3}(?:,\d{3})*|\d+)', lower_line)
                 matches = curr_matches
 
-            line_amounts = []
+            line_amounts: list[float] = []
             for m in matches:
                 val = float(m.replace(',', ''))
-                if val > 0:
+                if plausible_inr_amount(val):
                     line_amounts.append(val)
                     all_fallback_amounts.append(val)
-                    
+
             if not line_amounts:
                 continue
 
-            # Prioritize amounts that explicitly sit on the same line as "total", "grand total", etc.
             is_total_line = any(kw in lower_line for kw in total_keywords)
             if is_total_line:
-                # If there are multiple numbers on a "Total" line, the largest is typically the total itself
                 found_amounts.append(max(line_amounts))
-                
+
         if found_amounts:
-            # If we found multiple explicit total lines (e.g. Subtotal vs Grand Total), take the max to get the final bill
             final_amount = max(found_amounts)
         elif all_fallback_amounts:
-            # Fallback for extremely noisy receipts where the word 'Total' was obliterated
             final_amount = max(all_fallback_amounts)
 
-        return {"amount": final_amount, "payment_method": payment_method}
+        if payment_provider and payment_method == "unknown":
+            payment_method = "upi"
+
+        flow_blob = " ".join(scan_lines) if scan_lines else ""
+        cash_flow = detect_cash_flow_from_text(flow_blob)
+
+        return {
+            "amount": final_amount,
+            "payment_method": payment_method,
+            "payment_provider": payment_provider,
+            "cash_flow": cash_flow,
+        }
 
     # ─── End-to-End Pipeline ────────────────────────────────────────────
 
@@ -260,7 +287,7 @@ class ReceiptOCR:
         raw_data = self.extract_raw_text(img)
         all_lines = self.sort_spatially(raw_data)
         key_lines = self.filter_key_lines(all_lines)
-        parsed = self.extract_payment_details(key_lines)
+        parsed = self.extract_payment_details(key_lines, all_lines=all_lines)
 
         return {
             "all_lines": all_lines, 
