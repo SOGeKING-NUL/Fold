@@ -31,7 +31,7 @@ File: `src/api/db/connection.py`
 
 What changed:
 
-- Startup migrations now **drop and recreate** finance tables for a clean V2 schema.
+- Startup schema hook **`ensure_schema()`** creates finance tables with **`CREATE TABLE IF NOT EXISTS`** so data persists across restarts (including `uvicorn --reload`). A **full wipe** is opt-in only: set **`FOLD_RESET_DATABASE=1`** (or `true`/`yes`) for one restart when you intentionally want a clean slate, then unset it.
 - Added constrained transaction typing:
   - `expense`, `income`, `investment`, `transfer`, `opening_balance`
 - Added constrained account typing:
@@ -47,8 +47,8 @@ Why:
 
 Important operational note:
 
-- Because migrations are destructive, startup recreates tables each run in current V2 mode.
-- This is intentional for current phase but should be changed to versioned migrations before production hardening.
+- Prefer **never** leaving `FOLD_RESET_DATABASE` enabled in production; it drops all ledger data.
+- Longer term, replace ad-hoc SQL with **versioned migrations** (e.g. Alembic) for additive schema changes.
 
 ### 2) Atomic Journal Posting Core
 
@@ -119,6 +119,17 @@ Why:
 - Financial insights must come from posted ledger entries, not model guesses alone.
 - Grouped breakdowns power dashboard style reporting and decision support.
 
+#### Double-entry: why `ledger_entries` has more rows than “actions”
+
+Each **business event** is one row in **`journal_transactions`** (e.g. opening balance = journal #3, one expense = journal #4).
+
+Each such journal posts **at least two** rows in **`ledger_entries`**: one **debit** and one **credit** of the same amount (balanced). So:
+
+- 1 opening balance + 1 expense ⇒ **2 journals** and **4 ledger lines** — this is correct, not duplicate data.
+- **Category correction** updates the existing expense line and metadata; it does **not** add another journal.
+
+If you ever see **twice as many `journal_transactions` rows** as you expect (e.g. four journals for two actions), that would indicate a bug or double-post; row count in **`ledger_entries` alone is not 1:1 with user actions.**
+
 ### 5) Telegram Dashboard V2
 
 Files:
@@ -152,6 +163,43 @@ Why:
 
 - Inline dashboard reduces command memorization friction.
 - Session-backed account preference allows practical multi-account spend routing.
+
+#### Category correction (Telegram)
+
+After an expense is recorded (AI path or `/expense`), the bot shows **Change category** plus the main dashboard. Tapping **Change category** swaps the inline keyboard to **category picks** and **« Back**; choosing a category (or Back) uses **`editMessageReplyMarkup`**. A category choice calls **`LedgerService.reassign_expense_category`** / **`LedgerRepository.reassign_expense_journal_category`**, which:
+
+- moves the **expense debit** line to the correct `expense_*` account (so balances stay consistent with the new label), and  
+- updates **`metadata_json`** (`category`, `category_user_corrected`).
+
+This is human feedback on top of model predictions, stored in Postgres today.
+
+#### Planned (not implemented): correction → CSV for retraining
+
+We want a **closed loop** for NLP accuracy: every time a user fixes a category, that example is **gold-label data** (raw or OCR/STT text → user-chosen category). The intended pipeline (design only for now):
+
+1. **Hook** on successful `reassign_expense_journal_category` (or a nightly job reading `metadata_json->'category_user_corrected'`).  
+2. **Append a row** to a **CSV** (or Parquet) training export, e.g. columns: `occurred_at`, `user_ref`, `journal_id`, `source`, `model_category`, `corrected_category`, `description` / `text_transcript`, optional `amount`, `payment_method`, `modality` (text/audio/image).  
+3. **Offline**: merge export with existing EDA / synthetic datasets, **fine-tune** DistilBERT (or successor), redeploy `my_finetuned_distilbert`.  
+4. Optionally also call or mirror **`POST /api/v1/correct`** / `category_overrides.json` for **immediate** recall on repeated merchants — complementary to bulk retraining.
+
+This is **not full reinforcement learning** in the RL control-theory sense; it is closer to **active learning** / **human-in-the-loop supervision** or **RLHF-style preference data** (corrections as implicit “which label is right”). Naming it “RL technique” in product language is fine as long as engineering treats it as **supervised fine-tuning from logged corrections**.
+
+**Implementation intentionally deferred** until we settle retention (PII in exports), deduplication, and whether the append is synchronous vs async worker.
+
+#### Reports — current behavior and implementation plan (Telegram)
+
+**Today (implemented):**
+
+- Callbacks **`report:weekly`** and **`report:monthly`** call **`LedgerService.get_enriched_period_report`**, using the same windows as before (**7-day** rolling weekly; **monthly** = **`max(1, day_of_month)`** days rolling, matching **`get_monthly_report`**).
+- One Telegram message: **UTC range hint** → **totals** (income / expense / investment / net) → **top categories** → **top accounts** → **by payment method** (non-zero lines only; per-section caps). Message truncated near 4000 chars if needed.
+
+**Next steps (plan):**
+
+1. **Export** — CSV/PDF and `sendDocument`; optional scheduled email.
+2. **Charts** — matplotlib/plotly → `sendPhoto`.
+3. **Calendar-aligned month** — optional alternate window (1st → today) if product wants statement-style periods instead of rolling `N` days.
+
+API clients can already use **`GET /api/v1/ledger/reports/breakdown/{user_ref}`** (with `period`, `group_by`) and **`GET /api/v1/ledger/transactions/{user_ref}`** for custom UIs; Telegram is the thin presentation layer on top.
 
 ## Accounting Templates Implemented
 
@@ -205,11 +253,12 @@ flowchart TD
 
 ## What Still Needs Next Iteration
 
-1. Move from destructive startup migration to versioned migrations.
+1. Move from `ensure_schema()` bootstrap to **versioned migrations** (Alembic or equivalent) for additive changes.
 2. Add explicit account-type mapping for `/transfer` command parsing in Telegram (currently defaults to asset in quick command path).
 3. Add richer multi-step Telegram setup wizard for creating custom accounts and opening balances via buttons/forms only.
 4. Add stronger idempotency and replay protections for webhook updates (`ingestion_events` integration not fully wired).
 5. Add integration tests for all journal template paths and report filters.
+6. **Training export pipeline:** append category corrections to CSV (or object store) for batch fine-tuning; see “Planned (not implemented)” under Telegram V2 above.
 
 ## Non-Goals (Still Deferred)
 
@@ -247,8 +296,7 @@ Health endpoint:
 
 Startup behavior:
 
-- `run_migrations()` executes on startup from `src/api/db/connection.py`.
-- Tables are auto-created if missing.
+- `run_migrations()` runs from `src/api/db/connection.py`: by default **`ensure_schema()`** (create-if-missing, **no data wipe**). Destructive reset only when **`FOLD_RESET_DATABASE=1`**.
 
 ## Environment and Config Decisions
 
@@ -495,11 +543,14 @@ So, if a user "just sends an image" to bot today:
 
 ## Database Tables Currently Auto-Migrated
 
-From `run_migrations()`:
+From `ensure_schema()` / optional reset (`FOLD_RESET_DATABASE`):
 
 - `users`
 - `accounts`
+- `payment_profiles`
 - `journal_transactions`
+- `journal_media`
+- `telegram_expense_pending_media`
 - `ledger_entries`
 - `telegram_sessions`
 - `ingestion_events`
@@ -735,3 +786,50 @@ category_id = torch.argmax(outputs.logits, dim=1).item()
 # Map 'category_id' back to your string labels (e.g., 0 -> "food")
 ```
 This local loading strategy ensures your backend executes inference offline in milliseconds without relying on external internet APIs.
+
+## Ops: One-time Cleanup for Bad OCR Journals
+
+After the V2.1 simplification (pooled `expense_operating` account + transaction cap), existing journals
+created with absurdly large OCR-derived amounts still pollute balances. Run these **once** against the
+production database to purge them:
+
+```sql
+-- 1. Find journals where any single entry exceeds the cap (₹1 crore = 1,000,000,000 minor units)
+SELECT jt.id, jt.description, le.amount_minor
+FROM journal_transactions jt
+JOIN ledger_entries le ON le.journal_transaction_id = jt.id
+WHERE le.amount_minor > 1000000000
+ORDER BY le.amount_minor DESC;
+
+-- 2. Delete their entries then the journals themselves
+DELETE FROM ledger_entries
+WHERE journal_transaction_id IN (
+    SELECT DISTINCT jt.id
+    FROM journal_transactions jt
+    JOIN ledger_entries le ON le.journal_transaction_id = jt.id
+    WHERE le.amount_minor > 1000000000
+);
+DELETE FROM journal_transactions
+WHERE id IN (
+    SELECT jt.id
+    FROM journal_transactions jt
+    LEFT JOIN ledger_entries le ON le.journal_transaction_id = jt.id
+    WHERE le.id IS NULL
+);
+
+-- 3. (Optional) Migrate existing per-category expense accounts to the pooled account
+UPDATE ledger_entries
+SET account_id = (
+    SELECT a.id FROM accounts a
+    JOIN users u ON u.id = a.user_id
+    WHERE a.code = 'expense_operating'
+      AND a.user_id = (SELECT user_id FROM accounts WHERE id = ledger_entries.account_id)
+    LIMIT 1
+)
+WHERE account_id IN (
+    SELECT id FROM accounts
+    WHERE account_type = 'expense' AND code != 'expense_operating'
+);
+```
+
+After running the cleanup, verify balances via the Telegram Balance Snapshot button.
