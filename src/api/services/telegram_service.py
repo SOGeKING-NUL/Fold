@@ -82,6 +82,15 @@ class TelegramService:
     )
     _EXPENSE_FLOW_STATES = frozenset({"awaiting_expense_entry", "awaiting_expense_amount"})
 
+    # Same slugs as NLP / receipt UPI detection (augment_dataset.UPI_PROVIDERS)
+    _UPI_LINK_PROVIDERS: tuple[tuple[str, str], ...] = (
+        ("gpay", "Google Pay"),
+        ("phonepe", "PhonePe"),
+        ("paytm", "Paytm"),
+        ("bhim", "BHIM"),
+        ("cred", "CRED"),
+    )
+
     def __init__(self, ledger_service: LedgerService | None = None) -> None:
         self.settings = get_settings()
         self.ledger_service = ledger_service or LedgerService()
@@ -127,6 +136,49 @@ class TelegramService:
                 row.append({"text": label, "callback_data": cb})
             rows.append(row)
         return rows
+
+    def _upi_provider_keyboard(self) -> list[list[dict]]:
+        """Inline buttons for apps the system recognises on receipts (matches NLP UPI labels)."""
+        rows: list[list[dict]] = []
+        pairs = list(self._UPI_LINK_PROVIDERS)
+        for i in range(0, len(pairs), 2):
+            row = []
+            for j in range(i, min(i + 2, len(pairs))):
+                slug, label = pairs[j]
+                row.append({"text": label, "callback_data": f"upiprov:{slug}"})
+            rows.append(row)
+        rows.append([{"text": "« Back", "callback_data": "dash:setup_menu"}])
+        return rows
+
+    async def _advance_upi_link_from_provider(
+        self,
+        chat_id: int,
+        telegram_user_id: int,
+        user_ref: str,
+        payload: dict,
+        prov_slug: str,
+    ) -> None:
+        prov_clean = re.sub(r"[^a-z0-9]+", "", prov_slug.lower()).strip()[:32]
+        if len(prov_clean) < 2:
+            await self.send_message(chat_id, "Invalid app. Tap a button or /cancel.")
+            return
+        payload["pending_upi_provider"] = prov_clean
+        kb = self._upi_account_pick_keyboard(user_ref)
+        if not kb:
+            self._clear_upi_wizard_payload(payload)
+            self._save_session(telegram_user_id, "idle", payload)
+            await self.send_message(
+                chat_id,
+                "No asset/liability accounts found. Add a bank or digital account first, then try Link UPI again.",
+                keyboard=self._onboarding_keyboard(),
+            )
+            return
+        self._save_session(telegram_user_id, "awaiting_upi_account_pick", payload)
+        await self.send_message(
+            chat_id,
+            f"Step 2/4: Link {prov_clean} to which account?\nTap a button below.",
+            keyboard=kb,
+        )
 
     @staticmethod
     def _clear_upi_wizard_payload(payload: dict) -> None:
@@ -790,7 +842,6 @@ class TelegramService:
             [
                 {"text": "Add bank / Link UPI", "callback_data": "dash:setup_menu"},
             ],
-            [{"text": "Opening balance", "callback_data": "dash:opening_balance"}],
         ]
 
     def _prestart_keyboard(self) -> list[list[dict]]:
@@ -1161,32 +1212,16 @@ class TelegramService:
                 if not raw_text or raw_text.startswith("/"):
                     await self.send_message(
                         chat_id,
-                        "Step 1/4: Which UPI app? Reply with a short name, e.g. phonepe, gpay, paytm\n"
-                        "Or /cancel.",
+                        "Step 1/4: Which UPI app?\nTap a button below (same apps we detect on receipts). Or /cancel.",
+                        keyboard=self._upi_provider_keyboard(),
                     )
                     return {"status": "ok", "message": "upi_need_provider"}
-                prov = re.sub(r"[^a-z0-9]+", "", raw_text.lower()).strip() or raw_text.strip().lower()
-                if len(prov) < 2:
-                    await self.send_message(chat_id, "Please send a valid app name (at least 2 characters). Or /cancel.")
-                    return {"status": "ok", "message": "upi_provider_short"}
-                payload["pending_upi_provider"] = prov[:32]
-                kb = self._upi_account_pick_keyboard(user_ref)
-                if not kb:
-                    self._clear_upi_wizard_payload(payload)
-                    self._save_session(telegram_user_id, "idle", payload)
-                    await self.send_message(
-                        chat_id,
-                        "No asset/liability accounts found. Add a bank or digital account first, then try Link UPI again.",
-                        keyboard=self._onboarding_keyboard(),
-                    )
-                    return {"status": "ok", "message": "upi_no_accounts"}
-                self._save_session(telegram_user_id, "awaiting_upi_account_pick", payload)
                 await self.send_message(
                     chat_id,
-                    f"Step 2/4: Link {prov} to which account?\nTap a button below.",
-                    keyboard=kb,
+                    "Use the buttons to pick an app (so it matches receipt detection). Or /cancel.",
+                    keyboard=self._upi_provider_keyboard(),
                 )
-                return {"status": "ok", "message": "upi_pick_account"}
+                return {"status": "ok", "message": "upi_use_buttons"}
 
             if flow_state == "awaiting_upi_profile_name":
                 if not raw_text or raw_text.startswith("/"):
@@ -1474,7 +1509,7 @@ class TelegramService:
                     "Fold:\n"
                     "/start — dashboard\n"
                     "Expenses: tap Add Expense, pick Cash/UPI/Card, then send plain text, a voice note, or a receipt photo.\n"
-                    "Dashboard: Opening balance picks an account; new accounts ask for opening balance after the nickname step.\n"
+                    "Dashboard: use /opening to set opening balance on an account; new accounts ask for opening balance after the nickname step.\n"
                     "Optional: /expense, /income, /investment, /transfer, /balance, /opening, /link_upi, /add_account"
                 ),
             )
@@ -1570,6 +1605,11 @@ class TelegramService:
                 await self.send_message(chat_id, f"Updated journal #{jid} to category: {cat}.")
                 return {"status": "ok", "message": "catfx_ok"}
             elif data.startswith("dash:setup_menu"):
+                session = self._get_session(telegram_user_id)
+                session_payload = dict(session.get("payload_json") or {})
+                if session.get("state") == "awaiting_upi_provider":
+                    self._clear_upi_wizard_payload(session_payload)
+                    self._save_session(telegram_user_id, "idle", session_payload)
                 await self.send_message(
                     chat_id,
                     "Add another bank or card, or link a UPI app to an existing account.\n"
@@ -1608,9 +1648,32 @@ class TelegramService:
                 await self.send_message(
                     chat_id,
                     "Link UPI — Step 1/4\n"
-                    "Which app? Reply with a short name, e.g. phonepe, gpay, paytm, cred\n"
+                    "Which app? Tap a button below (same apps we detect on receipts).\n"
                     "Or /cancel.",
+                    keyboard=self._upi_provider_keyboard(),
                 )
+                await self.answer_callback_query(cbq_id)
+                return {"status": "ok", "message": "upi_provider_prompt"}
+            elif data.startswith("upiprov:"):
+                slug = (data.split(":", 1)[1] if ":" in data else "").strip().lower()
+                allowed = {p[0] for p in self._UPI_LINK_PROVIDERS}
+                if slug not in allowed:
+                    await self.answer_callback_query(cbq_id, text="Unknown option.", show_alert=True)
+                    return {"status": "ok", "message": "upi_bad_provider_cb"}
+                session = self._get_session(telegram_user_id)
+                if session.get("state") != "awaiting_upi_provider":
+                    await self.send_message(
+                        chat_id,
+                        "No UPI link in progress. Tap “Link UPI App” from the setup menu or “Add bank / Link UPI” on the dashboard.",
+                    )
+                    await self.answer_callback_query(cbq_id)
+                    return {"status": "ok", "message": "upi_wrong_state_provider"}
+                session_payload = dict(session.get("payload_json") or {})
+                await self._advance_upi_link_from_provider(
+                    chat_id, telegram_user_id, user_ref, session_payload, slug
+                )
+                await self.answer_callback_query(cbq_id)
+                return {"status": "ok", "message": "upi_provider_chosen"}
             elif data.startswith("upilink:acct:"):
                 parts = data.split(":", 2)
                 acct_code = parts[2] if len(parts) > 2 else ""
