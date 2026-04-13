@@ -21,6 +21,8 @@ SRC_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if SRC_DIR not in sys.path:
     sys.path.insert(0, SRC_DIR)
 
+import logging
+
 from api.schemas import (
     TextRequest,
     CorrectionRequest,
@@ -28,10 +30,13 @@ from api.schemas import (
     TransactionResponse,
     ErrorResponse,
 )
+from api.config import get_settings
 from nlp.inference import TransactionExtractor
 from stt.transcriber import VoiceTranscriber
 from ocr.extractor import ReceiptOCR
+from ocr.upi_detector import UPIAppDetector
 
+_logger = logging.getLogger(__name__)
 
 # ─── Router ──────────────────────────────────────────────────────────────
 router = APIRouter(prefix="/api/v1")
@@ -40,6 +45,8 @@ router = APIRouter(prefix="/api/v1")
 _nlp: TransactionExtractor | None = None
 _stt: VoiceTranscriber | None = None
 _ocr: ReceiptOCR | None = None
+_upi_detector: UPIAppDetector | None = None
+_upi_detector_checked = False
 
 
 def get_nlp() -> TransactionExtractor:
@@ -64,6 +71,26 @@ def get_ocr() -> ReceiptOCR:
     if _ocr is None:
         _ocr = ReceiptOCR()
     return _ocr
+
+
+def get_upi_detector() -> UPIAppDetector | None:
+    """Singleton loader for the Roboflow UPI logo detector (optional)."""
+    global _upi_detector, _upi_detector_checked
+    if not _upi_detector_checked:
+        _upi_detector_checked = True
+        try:
+            settings = get_settings()
+            if settings.roboflow_api_key:
+                _upi_detector = UPIAppDetector(
+                    api_key=settings.roboflow_api_key,
+                    model_id=settings.roboflow_upi_model_id,
+                )
+                _logger.info("UPI logo detector enabled (model=%s)", settings.roboflow_upi_model_id)
+            else:
+                _logger.info("ROBOFLOW_API_KEY not set — UPI logo detection disabled")
+        except Exception:
+            _logger.exception("Failed to init UPI detector — logo detection disabled")
+    return _upi_detector
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -157,7 +184,6 @@ async def extract_from_image(file: UploadFile = File(...)):
     The raw text is additionally fed into DistilBERT for category guessing.
     """
     try:
-        # Save uploaded image to a temporary file
         suffix = os.path.splitext(file.filename or ".jpg")[1]
         with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
             content = await file.read()
@@ -168,22 +194,36 @@ async def extract_from_image(file: UploadFile = File(...)):
         ocr = get_ocr()
         ocr_result = ocr.process_receipt(tmp_path, use_preprocessing=False)
 
-        # Combine all OCR lines into a single text blob for NLP
         all_text = " ".join(ocr_result.get("all_lines", []))
         ocr_parsed = ocr_result.get("parsed", {})
 
-        # Step 2: Use NLP to guess the category from the raw OCR text
+        # Step 2: NLP on raw OCR text (category + text-based provider)
         nlp = get_nlp()
         nlp_result = nlp.extract(all_text)
 
-        # Step 3: Merge — OCR is authoritative for amount/payment,
-        # NLP is authoritative for category
+        # Step 3: Visual UPI logo detection (highest priority for provider)
+        visual_provider: str | None = None
+        detector = get_upi_detector()
+        if detector is not None:
+            visual_provider = detector.detect(tmp_path)
+
+        # Merge: amount (OCR > NLP), payment_method (OCR > NLP),
+        # payment_provider (visual > OCR > NLP)
         final_amount = ocr_parsed.get("amount") or nlp_result.get("amount")
         final_payment = ocr_parsed.get("payment_method")
         if final_payment == "unknown":
             final_payment = nlp_result.get("payment_method")
 
-        # Cleanup temp file
+        final_provider = (
+            visual_provider
+            or ocr_parsed.get("payment_provider")
+            or nlp_result.get("payment_provider")
+        )
+        if final_provider and (final_payment is None or final_payment == "unknown"):
+            final_payment = "upi"
+
+        final_cash_flow = ocr_parsed.get("cash_flow") or nlp_result.get("cash_flow")
+
         os.unlink(tmp_path)
 
         return TransactionResponse(
@@ -193,7 +233,9 @@ async def extract_from_image(file: UploadFile = File(...)):
                 amount=final_amount,
                 category=nlp_result["category"],
                 payment_method=final_payment,
+                payment_provider=final_provider,
                 bank_account=nlp_result.get("bank_account"),
+                cash_flow=final_cash_flow,
             )
         )
     except Exception as e:

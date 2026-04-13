@@ -18,7 +18,9 @@ class TransactionData(BaseModel):
     amount: Optional[float] = None
     category: str
     payment_method: Optional[str] = None
+    payment_provider: Optional[str] = None
     bank_account: Optional[str] = None
+    cash_flow: Optional[Literal["expense", "income"]] = None
 
 
 class TransactionResponse(BaseModel):
@@ -50,14 +52,19 @@ class CorrectionRequest(BaseModel):
     correct_category: str
 
 
+AccountType = Literal["asset", "liability", "equity", "income", "expense", "investment"]
+
+
 class LedgerPostRequest(BaseModel):
     user_ref: str
     amount: float
     description: str
-    expense_account_code: str = "expense_misc"
-    funding_account_code: str = "upi_wallet"
+    expense_account_code: str = "expense_operating"
+    funding_account_code: Optional[str] = None
+    funding_account_type: Optional[AccountType] = None
     source: str = "manual"
     external_ref: Optional[str] = None
+    payment_provider: Optional[str] = None
 
 
 class LedgerPostResponse(BaseModel):
@@ -71,7 +78,10 @@ class LedgerBalanceResponse(BaseModel):
     balances: list[dict]
 
 
-AccountType = Literal["asset", "liability", "equity", "income", "expense", "investment"]
+class PrimaryFundingRequest(BaseModel):
+    user_ref: str
+    account_code: str
+    account_type: AccountType
 
 
 class AccountUpsertRequest(BaseModel):
@@ -80,6 +90,9 @@ class AccountUpsertRequest(BaseModel):
     name: str
     account_type: AccountType
     currency: str = "INR"
+    institution_name: Optional[str] = None
+    account_number_last4: Optional[str] = None
+    is_digital: bool = False
 
 
 class AccountListResponse(BaseModel):
@@ -92,9 +105,9 @@ class LedgerIncomeRequest(BaseModel):
     user_ref: str
     amount: float
     description: str
-    income_account_code: str = "income_misc"
-    destination_account_code: str = "bank_savings"
-    destination_account_type: AccountType = "asset"
+    income_account_code: str = "income_operating"
+    destination_account_code: Optional[str] = None
+    destination_account_type: Optional[AccountType] = None
     source: str = "manual"
     external_ref: Optional[str] = None
     occurred_at: Optional[str] = None
@@ -107,8 +120,8 @@ class LedgerInvestmentRequest(BaseModel):
     amount: float
     description: str
     investment_account_code: str = "investment_portfolio"
-    funding_account_code: str = "bank_savings"
-    funding_account_type: AccountType = "asset"
+    funding_account_code: Optional[str] = None
+    funding_account_type: Optional[AccountType] = None
     source: str = "manual"
     external_ref: Optional[str] = None
     occurred_at: Optional[str] = None
@@ -150,3 +163,18 @@ class LedgerTransactionsResponse(BaseModel):
     status: Literal["success"] = "success"
     user_ref: str
     result: dict
+
+
+class PaymentProfileUpsertRequest(BaseModel):
+    user_ref: str
+    profile_type: Literal["upi", "card", "wallet", "bank_app"]
+    provider: str
+    profile_name: str
+    linked_account_code: str
+    handle_ref: Optional[str] = None
+
+
+class PaymentProfileListResponse(BaseModel):
+    status: Literal["success"] = "success"
+    user_ref: str
+    profiles: list[dict]
