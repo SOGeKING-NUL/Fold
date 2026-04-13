@@ -11,7 +11,7 @@ Improvements for categorization:
 - Adds explicit English cue lines per category to strengthen DistilBERT features.
 - friends: Hinglish + English P2P / split-bill templates (retrain model to predict this label).
 - UPI English templates include occasional "bank + last4" noise with correct ₹ amount in text.
-- Outliers: fewer fake category strings that collide with real labels.
+- Outliers: not injected; output is clean for production retraining.
 """
 
 from __future__ import annotations
@@ -463,7 +463,6 @@ def main():
                 )
 
     rows.extend(generate_friend_only_rows(350))
-    rows.extend(generate_outliers(120))
 
     random.shuffle(rows)
 
@@ -476,9 +475,9 @@ def main():
     print(f"Done! Read {input_file}")
     print(f"Generated {len(rows)} rows -> {output_file}")
     eng = sum(1 for r in rows if isinstance(r["text"], str) and "INR" in r["text"])
-    out = 120
+    out = 0
     upi_rows = sum(1 for r in rows if r.get("payment_provider"))
-    hin = len(rows) - eng - out
+    hin = len(rows) - eng
     print(f"  English rows   : {eng}")
     print(f"  Hinglish rows  : {hin}")
     print(f"  Outliers       : {out}")

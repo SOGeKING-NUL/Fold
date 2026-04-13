@@ -35,30 +35,22 @@ MODEL_DIR = os.path.join(os.path.dirname(__file__), "my_finetuned_distilbert")
 # Path to the user-correctable category override file
 OVERRIDES_PATH = os.path.join(os.path.dirname(__file__), "category_overrides.json")
 
-# Label mapping — must match the LabelEncoder order used during training.
-# sklearn's LabelEncoder sorts alphabetically, so this is the exact order.
-# Outlier labels (from EDA noise rows) are mapped but will be caught and
-# replaced with a fallback category during inference.
+# Label mapping — must match LabelEncoder.classes_ from training.
+# We only keep real production categories (no synthetic outlier labels).
 LABEL_MAP = {
-    0: "1234",          # outlier
-    1: "blabla",        # outlier
-    2: "education",
-    3: "emi",
-    4: "entertainment",
-    5: "error",         # outlier
-    6: "food",
-    7: "healthcare",
-    8: "investment",
-    9: "misc",          # outlier
-    10: "shopping",
-    11: "shopping_err", # outlier
-    12: "travel",
-    13: "unknown",      # outlier
-    14: "utilities",
+    0: "education",
+    1: "emi",
+    2: "entertainment",
+    3: "food",
+    4: "friends",
+    5: "healthcare",
+    6: "investment",
+    7: "shopping",
+    8: "travel",
+    9: "utilities",
 }
 
-# Valid categories (excluding EDA noise labels). "friends" needs a model retrain to be predicted;
-# until then, use category_overrides or Telegram "Change category".
+# Valid production categories.
 VALID_CATEGORIES = {
     "education", "emi", "entertainment", "food", "friends",
     "healthcare", "investment", "shopping", "travel", "utilities",

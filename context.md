@@ -833,3 +833,69 @@ WHERE account_id IN (
 ```
 
 After running the cleanup, verify balances via the Telegram Balance Snapshot button.
+
+## Update: V2.2 Ledger + Telegram + Dataset Improvements
+
+This section captures the latest implementation changes now present in the codebase.
+
+### 1) Safer ledger posting rules
+
+- Added `MAX_TRANSACTION_INR` support in `src/api/config.py` (default: `10000000`, i.e. ₹1 crore).
+- `LedgerService._to_minor()` now rejects values above this cap.
+- Spending preflight is enforced for **asset** funding accounts:
+  - `post_expense`, `post_investment`, and `post_transfer` validate projected balance before posting.
+  - If a debit would push an asset account below zero, posting is rejected with a user-facing error.
+- New repository helper: `get_account_balance_minor(user_ref, account_code)`.
+
+### 2) Pooled accounts + metadata categories
+
+- Expense, income, and investment posting now use pooled ledger account codes by default:
+  - `expense_operating`
+  - `income_operating`
+  - `investment_portfolio`
+- Expense recategorization no longer moves ledger lines across `expense_*` accounts.
+  - `reassign_expense_journal_category()` now updates `journal_transactions.metadata_json` only.
+- Category correction still works via Telegram "Change category" and metadata updates.
+
+### 3) Clearer balances/report UX
+
+- Telegram Balance Snapshot now shows only cash-relevant accounts (asset/liability), not expense/income buckets.
+- Added `LedgerService.get_cash_snapshot(user_ref)` for this filtered view.
+- Enriched weekly/monthly Telegram report removed the low-value "Top accounts" section and keeps:
+  - Totals
+  - Top categories
+  - By payment method
+
+### 4) UPI + onboarding flow improvements
+
+- Main dashboard now includes `Add bank / Link UPI` to continue setup even after onboarding is complete.
+- Onboarding copy now explicitly supports:
+  - adding multiple bank accounts over time,
+  - linking each UPI app (GPay/PhonePe/etc.) to a selected bank account.
+- UPI link wizard path remains:
+  1. provider
+  2. pick account
+  3. profile label
+  4. optional handle
+- Successful UPI linking sets `payment_provider` in session and confirms bank-account mapping.
+
+### 5) OCR/NLP extraction enhancements
+
+- Added OCR helper modules:
+  - `src/ocr/amount_plausibility.py` (reject ID-sized numbers as amounts)
+  - `src/ocr/cash_flow.py` (`paid to` -> expense, `received from` -> income)
+  - `src/ocr/upi_detector.py` (Roboflow UPI logo detector client)
+- `src/ocr/extractor.py` now uses plausibility and cash-flow detection.
+- `src/nlp/inference.py` now returns `cash_flow` and accepts `friends` in valid categories.
+- API schema/route (`src/api/schemas.py`, `src/api/routes.py`) include `cash_flow` in extraction responses.
+
+### 6) Dataset augmentation upgrades for retraining
+
+- `augment_dataset.py` was upgraded and now:
+  - auto-resolves input CSV from root or `src/nlp/train_transactions.csv`,
+  - applies category-aware payment method distributions,
+  - injects strong lexical cue templates per category,
+  - adds synthetic `friends`/P2P rows,
+  - includes occasional realistic UPI bank-last4 clutter in text lines.
+- Regenerated output: `eda_dataset_v2.csv`.
+- Note: model prediction of `friends` requires retraining/exporting a new DistilBERT checkpoint and aligned label mapping.
