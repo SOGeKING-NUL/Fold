@@ -1,14 +1,17 @@
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, HTTPException, Query
 
 from api.schemas import (
     AccountListResponse,
     AccountUpsertRequest,
     LedgerBalanceResponse,
+    PrimaryFundingRequest,
     LedgerIncomeRequest,
     LedgerInvestmentRequest,
     LedgerOpeningBalanceRequest,
     LedgerPostRequest,
     LedgerPostResponse,
+    PaymentProfileListResponse,
+    PaymentProfileUpsertRequest,
     LedgerReportResponse,
     LedgerTransactionsResponse,
     LedgerTransferRequest,
@@ -20,6 +23,7 @@ from api.services.ledger_service import (
     IncomeRequest,
     InvestmentRequest,
     OpeningBalanceRequest,
+    PaymentProfileUpsertRequest as ServicePaymentProfileUpsertRequest,
     TransferRequest,
 )
 
@@ -29,17 +33,22 @@ ledger_service = LedgerService()
 
 @router.post("/expense", response_model=LedgerPostResponse)
 async def post_expense(request: LedgerPostRequest):
-    result = ledger_service.post_expense(
-        ExpenseRequest(
-            user_ref=request.user_ref,
-            source=request.source,
-            description=request.description,
-            expense_account_code=request.expense_account_code,
-            funding_account_code=request.funding_account_code,
-            amount=request.amount,
-            external_ref=request.external_ref,
+    try:
+        result = ledger_service.post_expense(
+            ExpenseRequest(
+                user_ref=request.user_ref,
+                source=request.source,
+                description=request.description,
+                expense_account_code=request.expense_account_code,
+                funding_account_code=request.funding_account_code,
+                funding_account_type=request.funding_account_type,
+                amount=request.amount,
+                external_ref=request.external_ref,
+                payment_provider=request.payment_provider,
+            )
         )
-    )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     return LedgerPostResponse(result=result)
 
 
@@ -65,21 +74,24 @@ async def post_income(request: LedgerIncomeRequest):
 
 @router.post("/investment", response_model=LedgerPostResponse)
 async def post_investment(request: LedgerInvestmentRequest):
-    result = ledger_service.post_investment(
-        InvestmentRequest(
-            user_ref=request.user_ref,
-            source=request.source,
-            description=request.description,
-            amount=request.amount,
-            investment_account_code=request.investment_account_code,
-            funding_account_code=request.funding_account_code,
-            funding_account_type=request.funding_account_type,
-            external_ref=request.external_ref,
-            occurred_at=request.occurred_at,
-            category=request.category,
-            payment_method=request.payment_method,
+    try:
+        result = ledger_service.post_investment(
+            InvestmentRequest(
+                user_ref=request.user_ref,
+                source=request.source,
+                description=request.description,
+                amount=request.amount,
+                investment_account_code=request.investment_account_code,
+                funding_account_code=request.funding_account_code,
+                funding_account_type=request.funding_account_type,
+                external_ref=request.external_ref,
+                occurred_at=request.occurred_at,
+                category=request.category,
+                payment_method=request.payment_method,
+            )
         )
-    )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     return LedgerPostResponse(result=result)
 
 
@@ -128,6 +140,9 @@ async def upsert_account(request: AccountUpsertRequest):
             name=request.name,
             account_type=request.account_type,
             currency=request.currency,
+            institution_name=request.institution_name,
+            account_number_last4=request.account_number_last4,
+            is_digital=request.is_digital,
         )
     )
     return LedgerPostResponse(result=result)
@@ -137,6 +152,44 @@ async def upsert_account(request: AccountUpsertRequest):
 async def list_accounts(user_ref: str):
     accounts = ledger_service.list_accounts(user_ref)
     return AccountListResponse(user_ref=user_ref, accounts=accounts)
+
+
+@router.post("/primary-funding", response_model=LedgerPostResponse)
+async def set_primary_funding(request: PrimaryFundingRequest):
+    try:
+        result = ledger_service.set_primary_funding_account(
+            request.user_ref, request.account_code, request.account_type
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return LedgerPostResponse(result=result)
+
+
+@router.post("/payment-profiles", response_model=LedgerPostResponse)
+async def upsert_payment_profile(request: PaymentProfileUpsertRequest):
+    result = ledger_service.upsert_payment_profile(
+        ServicePaymentProfileUpsertRequest(
+            user_ref=request.user_ref,
+            profile_type=request.profile_type,
+            provider=request.provider,
+            profile_name=request.profile_name,
+            linked_account_code=request.linked_account_code,
+            handle_ref=request.handle_ref,
+        )
+    )
+    return LedgerPostResponse(result=result)
+
+
+@router.get("/payment-profiles/{user_ref}", response_model=PaymentProfileListResponse)
+async def list_payment_profiles(user_ref: str):
+    profiles = ledger_service.list_payment_profiles(user_ref)
+    return PaymentProfileListResponse(user_ref=user_ref, profiles=profiles)
+
+
+@router.get("/onboarding-status/{user_ref}", response_model=LedgerReportResponse)
+async def get_onboarding_status(user_ref: str):
+    report = ledger_service.get_onboarding_status(user_ref)
+    return LedgerReportResponse(user_ref=user_ref, report=report)
 
 
 @router.get("/balances/{user_ref}", response_model=LedgerBalanceResponse)
