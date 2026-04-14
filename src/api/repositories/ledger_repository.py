@@ -253,6 +253,55 @@ class LedgerRepository:
                 )
                 return cur.fetchall()
 
+    def resolve_funding_account_by_last4(
+        self,
+        user_ref: str,
+        last4: str,
+        institution_hint: str | None = None,
+    ) -> dict | None:
+        """
+        Match a receipt line like "HDFC Bank 1751" to the user's asset/liability account
+        with the same account_number_last4. If several accounts share last4 (rare), use
+        institution_hint (e.g. "hdfc") against institution_name / account name.
+        """
+        digits = "".join(ch for ch in str(last4) if ch.isdigit())
+        if len(digits) != 4:
+            return None
+        with get_db_connection() as conn:
+            with conn.cursor(row_factory=dict_row) as cur:
+                cur.execute(
+                    """
+                    SELECT a.code, a.account_type, a.institution_name, a.name
+                    FROM users u
+                    JOIN accounts a ON a.user_id = u.id
+                    WHERE u.external_user_ref = %s
+                      AND a.account_type IN ('asset', 'liability')
+                      AND trim(a.account_number_last4) = %s
+                      AND a.is_active = TRUE
+                    """,
+                    (user_ref, digits),
+                )
+                rows = list(cur.fetchall())
+        if not rows:
+            return None
+        if len(rows) == 1:
+            return {"code": rows[0]["code"], "account_type": rows[0]["account_type"]}
+        if not institution_hint:
+            return None
+        hint = institution_hint.lower().strip()
+        if not hint:
+            return None
+
+        def matches(row: dict) -> bool:
+            iname = (row.get("institution_name") or "").lower()
+            aname = (row.get("name") or "").lower()
+            return hint in iname or hint in aname or iname.startswith(hint)
+
+        scored = [r for r in rows if matches(r)]
+        if len(scored) == 1:
+            return {"code": scored[0]["code"], "account_type": scored[0]["account_type"]}
+        return None
+
     def resolve_linked_account_for_provider(self, user_ref: str, profile_type: str, provider: str) -> dict | None:
         with get_db_connection() as conn:
             with conn.cursor(row_factory=dict_row) as cur:

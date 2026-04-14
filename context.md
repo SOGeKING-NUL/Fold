@@ -899,3 +899,21 @@ This section captures the latest implementation changes now present in the codeb
   - includes occasional realistic UPI bank-last4 clutter in text lines.
 - Regenerated output: `eda_dataset_v2.csv`.
 - Note: model prediction of `friends` requires retraining/exporting a new DistilBERT checkpoint and aligned label mapping.
+
+### 7) Final image routing (Roboflow-first)
+
+- `ROBOFLOW_UPI_MODEL_ID` is now used as the first decision point for image flow.
+- Implemented in:
+  - `src/api/routes.py` (`POST /api/v1/extract/image`)
+  - `src/api/services/telegram_service.py` (`_extract_from_image_file`)
+- Runtime order is now:
+  1. Run Roboflow logo detector first.
+  2. If UPI logo is detected: run OCR in raw mode (`use_preprocessing=False`), then pass OCR transcript to NLP.
+  3. If UPI logo is not detected: run OCR with preprocessing (`use_preprocessing=True`), then pass OCR transcript to NLP.
+  4. Amount arbitration remains modality-aware:
+     - UPI evidence -> NLP amount priority
+     - Non-UPI/invoice evidence -> OCR amount priority
+- Added debug visibility fields in extraction responses:
+  - `debug_is_upi_evidence`
+  - `debug_amount_source`
+  - `debug_ocr_preprocessing`

@@ -3,7 +3,12 @@ import numpy as np
 from paddleocr import PaddleOCR
 import re
 
-from ocr.amount_plausibility import plausible_inr_amount
+from ocr.amount_plausibility import (
+    _is_year_in_date_context,
+    extract_payment_instrument_from_lines,
+    is_likely_bank_last4_in_line,
+    plausible_inr_amount,
+)
 from ocr.cash_flow import detect_cash_flow_from_text
 
 
@@ -200,7 +205,20 @@ class ReceiptOCR:
         payment_method = "unknown"
         payment_provider: str | None = None
 
-        total_keywords = ["grand total", "total", "payable", "cash", "net amount", "amount paid", "balance", "net", "paid", "sent", "successful"]
+        total_keywords = [
+            "grand total",
+            "total",
+            "payable",
+            "cash",
+            "net amount",
+            "amount paid",
+            "balance",
+            "net",
+            "paid",
+            "sent",
+            "successful",
+            "completed",  # GPay / many apps: "Completed" on success screen
+        ]
 
         found_amounts: list[float] = []
         all_fallback_amounts: list[float] = []
@@ -219,7 +237,16 @@ class ReceiptOCR:
                 if kw in lower_line and payment_provider is None:
                     payment_provider = prov
 
-        for line in key_lines:
+        # Scan both key lines and full OCR lines so we do not miss a hero amount when
+        # filter_key_lines drops a bare "100" row; still drop bank last-4 (e.g. "HDFC Bank 1751").
+        seen_line: set[str] = set()
+        amount_lines: list[str] = []
+        for L in list(key_lines or []) + list(all_lines or []):
+            if L not in seen_line:
+                seen_line.add(L)
+                amount_lines.append(L)
+
+        for line in amount_lines:
             lower_line = line.lower()
 
             for kw in upi_keywords:
@@ -232,18 +259,30 @@ class ReceiptOCR:
                 if kw in lower_line:
                     payment_method = "cash"
 
-            matches = re.findall(r'(?<!\d)\d{1,3}(?:,\d{3})*(?:\.\d{2})\b|(?<!\d)\d+\.\d{2}\b', line)
+            matches = re.findall(
+                r'(?<!\d)\d{1,3}(?:,\d{3})*(?:\.\d{2})\b|(?<!\d)\d+\.\d{2}\b', line
+            )
 
             if not matches:
-                curr_matches = re.findall(r'(?:\b(?:rs\.?|inr|r)|[₹$])\s*(\d{1,3}(?:,\d{3})*|\d+)', lower_line)
+                curr_matches = re.findall(
+                    r'(?:\b(?:rs\.?|inr|r)|[₹$])\s*(\d{1,3}(?:,\d{3})*|\d+)', lower_line
+                )
                 matches = curr_matches
+            # GPay etc. often drop the rupee symbol; pick 2–4 digit amounts here, then drop last-4.
+            if not matches:
+                matches = re.findall(r'(?<![\d.])(\d{2,4})(?![\d.])', line)
 
             line_amounts: list[float] = []
             for m in matches:
-                val = float(m.replace(',', ''))
-                if plausible_inr_amount(val):
-                    line_amounts.append(val)
-                    all_fallback_amounts.append(val)
+                val = float(str(m).replace(",", ""))
+                if not plausible_inr_amount(val):
+                    continue
+                if is_likely_bank_last4_in_line(line, val):
+                    continue
+                if _is_year_in_date_context(line, val):
+                    continue
+                line_amounts.append(val)
+                all_fallback_amounts.append(val)
 
             if not line_amounts:
                 continue
@@ -263,11 +302,15 @@ class ReceiptOCR:
         flow_blob = " ".join(scan_lines) if scan_lines else ""
         cash_flow = detect_cash_flow_from_text(flow_blob)
 
+        inst_last4, inst_hint = extract_payment_instrument_from_lines(amount_lines)
+
         return {
             "amount": final_amount,
             "payment_method": payment_method,
             "payment_provider": payment_provider,
             "cash_flow": cash_flow,
+            "instrument_last4": inst_last4,
+            "instrument_institution_hint": inst_hint,
         }
 
     # ─── End-to-End Pipeline ────────────────────────────────────────────

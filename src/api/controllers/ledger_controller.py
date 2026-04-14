@@ -45,6 +45,8 @@ async def post_expense(request: LedgerPostRequest):
                 amount=request.amount,
                 external_ref=request.external_ref,
                 payment_provider=request.payment_provider,
+                receipt_account_last4=request.receipt_account_last4,
+                receipt_institution_hint=request.receipt_institution_hint,
             )
         )
     except ValueError as exc:

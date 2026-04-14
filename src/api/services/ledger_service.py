@@ -50,6 +50,9 @@ class ExpenseRequest:
     category: str | None = None
     payment_method: str | None = None
     payment_provider: str | None = None
+    # From OCR receipt row, e.g. "HDFC Bank 1751" — overrides UPI-app link when resolved in DB
+    receipt_account_last4: str | None = None
+    receipt_institution_hint: str | None = None
 
 
 @dataclass
@@ -218,7 +221,20 @@ class LedgerService:
         amount_minor = self._to_minor(payload.amount)
         funding_code = payload.funding_account_code
         funding_type = payload.funding_account_type
-        if payload.payment_provider:
+        resolved_from_receipt = False
+        if payload.receipt_account_last4:
+            digits = "".join(ch for ch in str(payload.receipt_account_last4) if ch.isdigit())
+            if len(digits) == 4:
+                by_last4 = self.repository.resolve_funding_account_by_last4(
+                    payload.user_ref,
+                    digits,
+                    payload.receipt_institution_hint,
+                )
+                if by_last4:
+                    funding_code = by_last4["code"]
+                    funding_type = by_last4["account_type"]
+                    resolved_from_receipt = True
+        if not resolved_from_receipt and payload.payment_provider:
             linked = self.repository.resolve_linked_account_for_provider(
                 user_ref=payload.user_ref,
                 profile_type="upi",

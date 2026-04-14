@@ -177,11 +177,12 @@ async def extract_from_image(file: UploadFile = File(...)):
     """
     Extract structured transaction data from a receipt image.
 
-    Flow: .jpg/.png → PaddleOCR → raw text lines → NLP category guess
-          + OCR amount/payment extraction.
-
-    The OCR engine handles amount and payment_method extraction natively.
-    The raw text is additionally fed into DistilBERT for category guessing.
+    Flow:
+      1) Roboflow logo model first (UPI detection),
+      2) OCR mode decision:
+         - UPI detected -> raw OCR
+         - no UPI detected -> preprocessed OCR
+      3) OCR transcript to NLP.
     """
     try:
         suffix = os.path.splitext(file.filename or ".jpg")[1]
@@ -190,26 +191,38 @@ async def extract_from_image(file: UploadFile = File(...)):
             tmp.write(content)
             tmp_path = tmp.name
 
-        # Step 1: Run PaddleOCR
-        ocr = get_ocr()
-        ocr_result = ocr.process_receipt(tmp_path, use_preprocessing=False)
-
-        all_text = " ".join(ocr_result.get("all_lines", []))
-        ocr_parsed = ocr_result.get("parsed", {})
-
-        # Step 2: NLP on raw OCR text (category + text-based provider)
-        nlp = get_nlp()
-        nlp_result = nlp.extract(all_text)
-
-        # Step 3: Visual UPI logo detection (highest priority for provider)
+        # Step 1: Visual UPI logo detection first (model-driven routing)
         visual_provider: str | None = None
         detector = get_upi_detector()
         if detector is not None:
             visual_provider = detector.detect(tmp_path)
 
-        # Merge: amount (OCR > NLP), payment_method (OCR > NLP),
-        # payment_provider (visual > OCR > NLP)
-        final_amount = ocr_parsed.get("amount") or nlp_result.get("amount")
+        # Step 2: Run PaddleOCR in routed mode
+        use_preprocessing = not bool(visual_provider)
+        ocr = get_ocr()
+        ocr_result = ocr.process_receipt(tmp_path, use_preprocessing=use_preprocessing)
+
+        all_text = " ".join(ocr_result.get("all_lines", []))
+        ocr_parsed = ocr_result.get("parsed", {})
+
+        # Step 3: NLP on OCR text
+        nlp = get_nlp()
+        nlp_result = nlp.extract(all_text)
+
+        # Merge:
+        # - UPI screenshots: NLP amount works better (currency-tagged / app-style text)
+        # - Invoice/bill images: OCR total-line extraction works better
+        is_upi_evidence = bool(
+            visual_provider
+            or ocr_parsed.get("payment_provider")
+            or nlp_result.get("payment_provider")
+            or ocr_parsed.get("payment_method") == "upi"
+            or nlp_result.get("payment_method") == "upi"
+        )
+        if is_upi_evidence:
+            final_amount = nlp_result.get("amount") or ocr_parsed.get("amount")
+        else:
+            final_amount = ocr_parsed.get("amount") or nlp_result.get("amount")
         final_payment = ocr_parsed.get("payment_method")
         if final_payment == "unknown":
             final_payment = nlp_result.get("payment_method")
@@ -220,6 +233,8 @@ async def extract_from_image(file: UploadFile = File(...)):
             or nlp_result.get("payment_provider")
         )
         if final_provider and (final_payment is None or final_payment == "unknown"):
+            final_payment = "upi"
+        if is_upi_evidence and (final_payment is None or final_payment == "unknown"):
             final_payment = "upi"
 
         final_cash_flow = ocr_parsed.get("cash_flow") or nlp_result.get("cash_flow")
@@ -236,8 +251,42 @@ async def extract_from_image(file: UploadFile = File(...)):
                 payment_provider=final_provider,
                 bank_account=nlp_result.get("bank_account"),
                 cash_flow=final_cash_flow,
+                receipt_account_last4=ocr_parsed.get("instrument_last4"),
+                receipt_institution_hint=ocr_parsed.get("instrument_institution_hint"),
+                debug_is_upi_evidence=is_upi_evidence,
+                debug_amount_source="nlp" if is_upi_evidence else "ocr",
+                debug_ocr_preprocessing=use_preprocessing,
             )
         )
+    except Exception as e:
+        if 'tmp_path' in locals() and os.path.exists(tmp_path):
+            os.unlink(tmp_path)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/debug/upi-logo")
+async def debug_upi_logo(file: UploadFile = File(...)):
+    """
+    Debug endpoint to test Roboflow UPI-logo model directly.
+    Returns raw detection payload + resolved provider.
+    """
+    try:
+        suffix = os.path.splitext(file.filename or ".jpg")[1]
+        with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+            content = await file.read()
+            tmp.write(content)
+            tmp_path = tmp.name
+
+        detector = get_upi_detector()
+        if detector is None:
+            raise HTTPException(status_code=400, detail="UPI detector disabled: ROBOFLOW_API_KEY missing")
+        dbg = detector.detect_with_debug(tmp_path)
+        os.unlink(tmp_path)
+        return {"status": "success", **dbg}
+    except HTTPException:
+        if 'tmp_path' in locals() and os.path.exists(tmp_path):
+            os.unlink(tmp_path)
+        raise
     except Exception as e:
         if 'tmp_path' in locals() and os.path.exists(tmp_path):
             os.unlink(tmp_path)

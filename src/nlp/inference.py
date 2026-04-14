@@ -23,7 +23,11 @@ import os
 import torch
 from transformers import AutoTokenizer, AutoModelForSequenceClassification
 
-from ocr.amount_plausibility import plausible_inr_amount
+from ocr.amount_plausibility import (
+    _is_year_in_date_context,
+    is_likely_bank_last4_in_line,
+    plausible_inr_amount,
+)
 from ocr.cash_flow import detect_cash_flow_from_text
 
 
@@ -210,10 +214,13 @@ class TransactionExtractor:
                             return amt
 
         # Layer 3: Bare number fallback (largest number ≥ 10), excluding ref-id-sized integers
+        # and 4-digit bank/card last-4 (same heuristic as OCR — e.g. "HDFC Bank 1751").
         numbers = re.findall(r'\b(\d[\d,]*\.?\d*)\b', lower)
         if numbers:
             parsed = [float(n.replace(',', '')) for n in numbers]
             large = [n for n in parsed if n >= 10 and plausible_inr_amount(n)]
+            large = [n for n in large if not is_likely_bank_last4_in_line(lower, n)]
+            large = [n for n in large if not _is_year_in_date_context(lower, n)]
             if large:
                 return max(large)
 

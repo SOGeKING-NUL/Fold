@@ -21,6 +21,13 @@ class TransactionData(BaseModel):
     payment_provider: Optional[str] = None
     bank_account: Optional[str] = None
     cash_flow: Optional[Literal["expense", "income"]] = None
+    # From OCR payment-instrument row (e.g. "HDFC Bank 1751") when present
+    receipt_account_last4: Optional[str] = None
+    receipt_institution_hint: Optional[str] = None
+    # Debug visibility for image routing
+    debug_is_upi_evidence: Optional[bool] = None
+    debug_amount_source: Optional[str] = None
+    debug_ocr_preprocessing: Optional[bool] = None
 
 
 class TransactionResponse(BaseModel):
@@ -65,6 +72,8 @@ class LedgerPostRequest(BaseModel):
     source: str = "manual"
     external_ref: Optional[str] = None
     payment_provider: Optional[str] = None
+    receipt_account_last4: Optional[str] = None
+    receipt_institution_hint: Optional[str] = None
 
 
 class LedgerPostResponse(BaseModel):
