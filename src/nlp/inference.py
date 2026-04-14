@@ -21,7 +21,8 @@ import re
 import json
 import os
 import torch
-from transformers import AutoTokenizer, AutoModelForSequenceClassification
+import torch.nn as nn
+from transformers import AutoTokenizer, AutoModelForSequenceClassification, AutoModel
 
 from ocr.amount_plausibility import (
     _is_year_in_date_context,
@@ -33,8 +34,11 @@ from ocr.cash_flow import detect_cash_flow_from_text
 
 # ─── Constants ───────────────────────────────────────────────────────────
 
-# Path to the fine-tuned DistilBERT model directory
+# v1 single-head model (current deployed checkpoint)
 MODEL_DIR = os.path.join(os.path.dirname(__file__), "my_finetuned_distilbert")
+
+# v3 multi-head model (after retraining on eda_dataset_v3.csv)
+MODEL_V3_DIR = os.path.join(os.path.dirname(__file__), "my_finetuned_distilbert_v3")
 
 # Path to the user-correctable category override file
 OVERRIDES_PATH = os.path.join(os.path.dirname(__file__), "category_overrides.json")
@@ -66,7 +70,9 @@ FALLBACK_CATEGORY = "shopping"  # Default if model predicts an outlier label
 INDIAN_BANKS = [
     "hdfc", "sbi", "icici", "axis", "kotak", "pnb",
     "bob", "yes bank", "idfc", "indusind", "canara",
-    "union bank", "federal bank", "rbl", "bandhan"
+    "union bank", "federal bank", "rbl", "bandhan",
+    "slice", "jupiter", "fi money", "fi bank", "niyo",
+    "paytm payments bank",
 ]
 
 # ─── Payment Method Keywords ────────────────────────────────────────────
@@ -89,6 +95,10 @@ UPI_PROVIDER_MAP: dict[str, str] = {
     "amazonpay": "amazonpay",
     "freecharge": "freecharge",
     "mobikwik": "mobikwik",
+    "slice": "slice",
+    "jupiter": "jupiter",
+    "fi": "fi",
+    "niyo": "niyo",
 }
 
 # ─── Hindi Amount Multipliers ───────────────────────────────────────────
@@ -100,19 +110,71 @@ HINDI_MULTIPLIERS = {
 }
 
 
+class _MultiHeadDistilBERT(nn.Module):
+    """DistilBERT encoder with three classification heads (category, method, bank)."""
+
+    def __init__(self, encoder, num_cat: int, num_method: int, num_bank: int):
+        super().__init__()
+        self.encoder = encoder
+        hidden = encoder.config.hidden_size
+        self.head_cat = nn.Linear(hidden, num_cat)
+        self.head_method = nn.Linear(hidden, num_method)
+        self.head_bank = nn.Linear(hidden, num_bank)
+
+    def forward(self, input_ids=None, attention_mask=None, **kwargs):
+        outputs = self.encoder(input_ids=input_ids, attention_mask=attention_mask)
+        cls_output = outputs.last_hidden_state[:, 0]
+        return {
+            "logits_cat": self.head_cat(cls_output),
+            "logits_method": self.head_method(cls_output),
+            "logits_bank": self.head_bank(cls_output),
+        }
+
+
 class TransactionExtractor:
     """
     Loads the fine-tuned DistilBERT model once at init and provides
     a single `extract()` method for all downstream callers.
+
+    Supports two model versions:
+    - v1 (single-head): category only, regex for payment/bank
+    - v3 (multi-head): category + payment_method + bank_account from model
+    Falls back to v1 if v3 checkpoint is not present.
     """
 
     def __init__(self):
         """Load model, tokenizer, and category overrides into memory."""
-        print("[NLP] Loading DistilBERT model from:", MODEL_DIR)
-        self.tokenizer = AutoTokenizer.from_pretrained(MODEL_DIR)
-        self.model = AutoModelForSequenceClassification.from_pretrained(MODEL_DIR)
-        self.model.eval()  # Freeze dropout and batch-norm layers
-        print("[NLP] Model loaded successfully.")
+        self.use_v3 = False
+        self.v3_label_maps: dict = {}
+
+        # Try v3 multi-head model first
+        heads_path = os.path.join(MODEL_V3_DIR, "heads.pt")
+        maps_path = os.path.join(MODEL_V3_DIR, "label_maps_v3.json")
+        if os.path.isdir(MODEL_V3_DIR) and os.path.isfile(heads_path) and os.path.isfile(maps_path):
+            print("[NLP] Loading multi-head v3 model from:", MODEL_V3_DIR)
+            self.tokenizer = AutoTokenizer.from_pretrained(MODEL_V3_DIR)
+            encoder = AutoModel.from_pretrained(MODEL_V3_DIR)
+            with open(maps_path, "r", encoding="utf-8") as f:
+                self.v3_label_maps = json.load(f)
+            head_state = torch.load(heads_path, map_location="cpu", weights_only=True)
+            self.model = _MultiHeadDistilBERT(
+                encoder,
+                num_cat=head_state["num_cat"],
+                num_method=head_state["num_method"],
+                num_bank=head_state["num_bank"],
+            )
+            self.model.head_cat.load_state_dict(head_state["head_cat"])
+            self.model.head_method.load_state_dict(head_state["head_method"])
+            self.model.head_bank.load_state_dict(head_state["head_bank"])
+            self.model.eval()
+            self.use_v3 = True
+            print("[NLP] Multi-head v3 model loaded successfully.")
+        else:
+            print("[NLP] Loading single-head v1 model from:", MODEL_DIR)
+            self.tokenizer = AutoTokenizer.from_pretrained(MODEL_DIR)
+            self.model = AutoModelForSequenceClassification.from_pretrained(MODEL_DIR)
+            self.model.eval()
+            print("[NLP] Model loaded successfully.")
 
         self.overrides = self._load_overrides()
 
@@ -141,6 +203,35 @@ class TransactionExtractor:
 
     # ─── Category Prediction ────────────────────────────────────────
 
+    def _predict_all_v3(self, text: str) -> dict:
+        """Run v3 multi-head model and return category, payment_method, bank_account."""
+        inputs = self.tokenizer(
+            text, return_tensors="pt", truncation=True, max_length=128, padding=True
+        )
+        with torch.no_grad():
+            out = self.model(**inputs)
+
+        cat_map = self.v3_label_maps.get("category", {})
+        method_map = self.v3_label_maps.get("payment_method", {})
+        bank_map = self.v3_label_maps.get("bank_account", {})
+
+        cat_id = out["logits_cat"].argmax(dim=1).item()
+        method_id = out["logits_method"].argmax(dim=1).item()
+        bank_id = out["logits_bank"].argmax(dim=1).item()
+
+        category = cat_map.get(str(cat_id), FALLBACK_CATEGORY)
+        method = method_map.get(str(method_id), "unknown")
+        bank = bank_map.get(str(bank_id), "unknown")
+
+        if category not in VALID_CATEGORIES:
+            category = FALLBACK_CATEGORY
+        if method == "unknown":
+            method = None
+        if bank == "unknown":
+            bank = None
+
+        return {"category": category, "payment_method": method, "bank_account": bank}
+
     def _predict_category(self, text: str) -> str:
         """
         Priority chain:
@@ -150,28 +241,23 @@ class TransactionExtractor:
         """
         lower = text.lower()
 
-        # Step 1: Override check (exact substring match)
         for keyword, category in self.overrides.items():
             if keyword in lower:
                 print(f"[NLP] Override matched: '{keyword}' → '{category}'")
                 return category
 
-        # Step 2: DistilBERT inference
-        inputs = self.tokenizer(
-            text,
-            return_tensors="pt",
-            truncation=True,
-            max_length=128,
-            padding=True
-        )
+        if self.use_v3:
+            return self._predict_all_v3(text)["category"]
 
+        inputs = self.tokenizer(
+            text, return_tensors="pt", truncation=True, max_length=128, padding=True
+        )
         with torch.no_grad():
             outputs = self.model(**inputs)
 
         predicted_id = torch.argmax(outputs.logits, dim=1).item()
         predicted_label = LABEL_MAP.get(predicted_id, FALLBACK_CATEGORY)
 
-        # Step 3: Validate — if model returned an outlier label, use fallback
         if predicted_label not in VALID_CATEGORIES:
             print(f"[NLP] Model predicted outlier '{predicted_label}', using fallback.")
             return FALLBACK_CATEGORY
@@ -198,10 +284,10 @@ class TransactionExtractor:
                 if plausible_inr_amount(amt):
                     return amt
 
-        # Layer 2: Currency-tagged numbers
+        # Layer 2: Currency-tagged numbers (includes OCR garble variants of ₹)
         currency_match = re.findall(
-            r'(?:rs\.?|inr|₹|rupaye|rupay|rupees?)\s*(\d[\d,]*\.?\d*)|'
-            r'(\d[\d,]*\.?\d*)\s*(?:rs\.?|inr|₹|rupaye|rupay|rupees?)',
+            r'(?:rs\.?|inr|₹|rupaye|rupay|rupees?|rupiya|rupaiye)\s*(\d[\d,]*\.?\d*)|'
+            r'(\d[\d,]*\.?\d*)\s*(?:rs\.?|inr|₹|rupaye|rupay|rupees?|rupiya|rupaiye)',
             lower
         )
         if currency_match:
@@ -279,26 +365,34 @@ class TransactionExtractor:
         Master extraction method. Takes any raw text and returns
         a fully structured transaction dict.
 
-        Args:
-            text: Raw input (Whisper transcript, OCR text, or WhatsApp message).
-
-        Returns:
-            {
-                "amount": float | None,
-                "category": str,
-                "payment_method": str | None,
-                "payment_provider": str | None,
-                "bank_account": str | None,
-                "cash_flow": expense, income, or None (from phrases like paid to / received from),
-            }
+        When the v3 multi-head model is loaded, model predictions for
+        payment_method and bank_account are used as primary signal with
+        regex as fallback/enrichment.
         """
+        amount = self._extract_amount(text)
+        regex_pm = self._extract_payment_method(text)
+        regex_provider = self._extract_payment_provider(text)
+        regex_bank = self._extract_bank(text)
+        cash_flow = detect_cash_flow_from_text(text)
+
+        if self.use_v3:
+            v3 = self._predict_all_v3(text)
+            category = v3["category"]
+            # Model prediction wins; regex fills gaps the model missed
+            payment_method = v3["payment_method"] or regex_pm
+            bank_account = v3["bank_account"] or regex_bank
+        else:
+            category = self._predict_category(text)
+            payment_method = regex_pm
+            bank_account = regex_bank
+
         return {
-            "amount": self._extract_amount(text),
-            "category": self._predict_category(text),
-            "payment_method": self._extract_payment_method(text),
-            "payment_provider": self._extract_payment_provider(text),
-            "bank_account": self._extract_bank(text),
-            "cash_flow": detect_cash_flow_from_text(text),
+            "amount": amount,
+            "category": category,
+            "payment_method": payment_method,
+            "payment_provider": regex_provider,
+            "bank_account": bank_account,
+            "cash_flow": cash_flow,
         }
 
 

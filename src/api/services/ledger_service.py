@@ -58,6 +58,8 @@ class ExpenseRequest:
     # From OCR receipt row, e.g. "HDFC Bank 1751" — overrides UPI-app link when resolved in DB
     receipt_account_last4: str | None = None
     receipt_institution_hint: str | None = None
+    # From NLP bank name detection, e.g. "slice", "hdfc" — used to match user accounts by name
+    bank_hint: str | None = None
 
 
 @dataclass
@@ -268,37 +270,64 @@ class LedgerService:
 
         pm = self._normalize_expense_payment_method(payload.payment_method)
         if not resolved_from_receipt:
-            if pm == "cash":
-                self.ensure_cash_wallet_account(payload.user_ref)
-                funding_code = CASH_WALLET_CODE
-                funding_type = "asset"
-            elif pm == "card":
-                funding_code = "card_liability"
-                funding_type = "liability"
-            elif pm == "upi" and payload.payment_provider:
-                linked = self.repository.resolve_linked_account_for_provider(
-                    user_ref=payload.user_ref,
-                    profile_type="upi",
-                    provider=payload.payment_provider,
-                )
-                if linked:
-                    funding_code = linked["code"]
-                    funding_type = linked["account_type"]
+            # 1) Explicit bank/institution mention in the user's text (e.g. "via slice", "hdfc")
+            #    takes priority — resolve against the user's actual accounts.
+            bank_hint = (payload.bank_hint or "").strip().lower() or None
+            resolved_from_hint = False
+            if bank_hint:
+                if bank_hint == "cash":
+                    self.ensure_cash_wallet_account(payload.user_ref)
+                    funding_code = CASH_WALLET_CODE
+                    funding_type = "asset"
+                    resolved_from_hint = True
                 else:
+                    by_name = self.repository.resolve_funding_account_by_name(
+                        payload.user_ref, bank_hint,
+                    )
+                    if by_name:
+                        funding_code = by_name["code"]
+                        funding_type = by_name["account_type"]
+                        resolved_from_hint = True
+                    else:
+                        # User named an account we can't match — ignore the stale
+                        # session funding so payment-method logic gets a fair shot.
+                        funding_code = None
+                        funding_type = None
+
+            # 2) Payment-method keywords (cash / card / upi) — only when bank_hint
+            #    didn't already resolve to a real account.
+            if not resolved_from_hint and (funding_code is None or funding_type is None):
+                if pm == "cash":
+                    self.ensure_cash_wallet_account(payload.user_ref)
+                    funding_code = CASH_WALLET_CODE
+                    funding_type = "asset"
+                elif pm == "card":
+                    funding_code = "card_liability"
+                    funding_type = "liability"
+                elif pm == "upi" and payload.payment_provider:
+                    linked = self.repository.resolve_linked_account_for_provider(
+                        user_ref=payload.user_ref,
+                        profile_type="upi",
+                        provider=payload.payment_provider,
+                    )
+                    if linked:
+                        funding_code = linked["code"]
+                        funding_type = linked["account_type"]
+                    else:
+                        funding_code = "upi_wallet"
+                        funding_type = "asset"
+                elif payload.payment_provider:
+                    linked = self.repository.resolve_linked_account_for_provider(
+                        user_ref=payload.user_ref,
+                        profile_type="upi",
+                        provider=payload.payment_provider,
+                    )
+                    if linked:
+                        funding_code = linked["code"]
+                        funding_type = linked["account_type"]
+                elif pm == "upi":
                     funding_code = "upi_wallet"
                     funding_type = "asset"
-            elif payload.payment_provider:
-                linked = self.repository.resolve_linked_account_for_provider(
-                    user_ref=payload.user_ref,
-                    profile_type="upi",
-                    provider=payload.payment_provider,
-                )
-                if linked:
-                    funding_code = linked["code"]
-                    funding_type = linked["account_type"]
-            elif pm == "upi":
-                funding_code = "upi_wallet"
-                funding_type = "asset"
 
         if funding_code is None or funding_type is None:
             resolved = self.resolve_primary_cash_account(payload.user_ref, spending=True)

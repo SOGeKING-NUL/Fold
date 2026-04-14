@@ -193,6 +193,7 @@ class ReceiptOCR:
         "bharatpe": "bharatpe", "amazon pay": "amazonpay",
         "amazonpay": "amazonpay", "freecharge": "freecharge",
         "mobikwik": "mobikwik",
+        "slice": "slice", "jupiter": "jupiter", "fi": "fi", "niyo": "niyo",
     }
 
     def extract_payment_details(self, key_lines: list, all_lines: list | None = None) -> dict:
@@ -265,7 +266,7 @@ class ReceiptOCR:
 
             if not matches:
                 curr_matches = re.findall(
-                    r'(?:\b(?:rs\.?|inr|r)|[₹$])\s*(\d{1,3}(?:,\d{3})*|\d+)', lower_line
+                    r'(?:\b(?:rs\.?|inr|r)|[₹$t?])\s*(\d{1,3}(?:,\d{3})*|\d+)', lower_line
                 )
                 matches = curr_matches
             # GPay etc. often drop the rupee symbol; pick 2–4 digit amounts here, then drop last-4.

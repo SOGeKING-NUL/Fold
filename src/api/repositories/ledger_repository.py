@@ -302,6 +302,43 @@ class LedgerRepository:
             return {"code": scored[0]["code"], "account_type": scored[0]["account_type"]}
         return None
 
+    def resolve_funding_account_by_name(self, user_ref: str, name_hint: str) -> dict | None:
+        """
+        Match a bank/institution name (e.g. "slice", "hdfc") to the user's asset/liability
+        account by checking institution_name, account name, and code for a substring match.
+        Returns the single best match, or None if ambiguous / not found.
+        """
+        hint = (name_hint or "").strip().lower()
+        if not hint:
+            return None
+        with get_db_connection() as conn:
+            with conn.cursor(row_factory=dict_row) as cur:
+                cur.execute(
+                    """
+                    SELECT a.code, a.account_type, a.institution_name, a.name
+                    FROM users u
+                    JOIN accounts a ON a.user_id = u.id
+                    WHERE u.external_user_ref = %s
+                      AND a.account_type IN ('asset', 'liability')
+                      AND a.is_active = TRUE
+                    """,
+                    (user_ref,),
+                )
+                rows = list(cur.fetchall())
+        if not rows:
+            return None
+
+        def matches(row: dict) -> bool:
+            iname = (row.get("institution_name") or "").lower()
+            aname = (row.get("name") or "").lower()
+            acode = (row.get("code") or "").lower()
+            return hint in iname or hint in aname or hint in acode
+
+        scored = [r for r in rows if matches(r)]
+        if len(scored) == 1:
+            return {"code": scored[0]["code"], "account_type": scored[0]["account_type"]}
+        return None
+
     def resolve_linked_account_for_provider(self, user_ref: str, profile_type: str, provider: str) -> dict | None:
         with get_db_connection() as conn:
             with conn.cursor(row_factory=dict_row) as cur:

@@ -567,8 +567,10 @@ class TelegramService:
         category = extracted.get("category") or "misc"
         funding_code = payload.get("funding_account_code")
         funding_type = payload.get("funding_account_type")
-        payment_provider = payload.get("payment_provider") or extracted.get("payment_provider")
+        ex_prov = extracted.get("payment_provider")
+        payment_provider = (str(ex_prov).lower() if ex_prov else None) or payload.get("payment_provider")
         pm = extracted.get("payment_method")
+        bank_hint = extracted.get("bank_account")
         ref = f"tg:{update_id}:{message_id}" if message_id is not None else f"tg:{update_id}"
         onboarding = self.ledger_service.get_onboarding_status(user_ref)
         if not onboarding["ready"]:
@@ -592,6 +594,7 @@ class TelegramService:
                 payment_provider=payment_provider,
                 receipt_account_last4=extracted.get("receipt_account_last4"),
                 receipt_institution_hint=extracted.get("receipt_institution_hint"),
+                bank_hint=str(bank_hint) if bank_hint else None,
             )
         )
         if media_blob and media_kind in ("image", "audio"):
@@ -1483,6 +1486,8 @@ class TelegramService:
                 ex_pm = extract.get("payment_method")
                 ex_cat = extract.get("category")
                 ex_prov = extract.get("payment_provider")
+                ex_bank = extract.get("bank_account")
+                # Only fall back to session provider when NLP found nothing in the text
                 payment_provider = (str(ex_prov).lower() if ex_prov else None) or session_payment_provider
                 onboarding = self.ledger_service.get_onboarding_status(user_ref)
                 if not onboarding["ready"]:
@@ -1505,15 +1510,27 @@ class TelegramService:
                             category=str(ex_cat) if ex_cat else None,
                             payment_method=str(ex_pm) if ex_pm else None,
                             payment_provider=payment_provider,
+                            bank_hint=str(ex_bank) if ex_bank else None,
                         )
                     )
                 except ValueError as exc:
                     await self.send_message(chat_id, str(exc))
                     return {"status": "ok", "message": "expense_funding_unresolved"}
                 jid = int(result["journal_id"])
+                fund_line = next(
+                    (e for e in result["entries"] if e.get("direction") == "credit"), None
+                )
+                paid_from = str(fund_line["account_code"]) if fund_line else "?"
+                category = str(ex_cat) if ex_cat else "misc"
+                short_desc = description[:120] + ("…" if len(description) > 120 else "")
+                lines = [
+                    f"Recorded ₹{amount:.2f} — {short_desc}",
+                    f"Category: {category}. Paid from: {paid_from}. Journal #{jid}.",
+                    "Wrong category? Tap Change category.",
+                ]
                 await self.send_message(
                     chat_id,
-                    f"Recorded expense. Journal #{jid}.\nWrong category? Tap Change category.",
+                    "\n".join(lines),
                     keyboard=self._keyboard_expense_recorded(jid),
                 )
                 return {"status": "ok", "result": result}

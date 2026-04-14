@@ -1,4 +1,5 @@
 import os
+import time
 from contextlib import contextmanager
 
 import psycopg
@@ -9,8 +10,21 @@ from api.config import get_settings
 @contextmanager
 def get_db_connection():
     settings = get_settings()
-    with psycopg.connect(settings.database_url) as conn:
-        yield conn
+    last_exc: Exception | None = None
+    for attempt in range(3):
+        try:
+            with psycopg.connect(settings.database_url) as conn:
+                yield conn
+                return
+        except psycopg.OperationalError as exc:
+            # Network/DNS hiccups can briefly fail webhook requests on Windows.
+            if "getaddrinfo failed" not in str(exc) or attempt == 2:
+                raise
+            last_exc = exc
+            time.sleep(0.5 * (attempt + 1))
+
+    if last_exc is not None:
+        raise last_exc
 
 
 _RESET_SCHEMA_SQL = """
