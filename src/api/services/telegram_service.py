@@ -10,6 +10,7 @@ from api.config import get_settings
 from api.repositories.ledger_repository import LedgerRepository
 from api.services.ledger_service import (
     AccountUpsertRequest,
+    CASH_WALLET_CODE,
     ExpenseRequest,
     IncomeRequest,
     InvestmentRequest,
@@ -81,6 +82,9 @@ class TelegramService:
         }
     )
     _EXPENSE_FLOW_STATES = frozenset({"awaiting_expense_entry", "awaiting_expense_amount"})
+    _TRANSFER_FLOW_STATES = frozenset(
+        {"awaiting_transfer_from_pick", "awaiting_transfer_to_pick", "awaiting_transfer_amount"}
+    )
 
     # Same slugs as NLP / receipt UPI detection (augment_dataset.UPI_PROVIDERS)
     _UPI_LINK_PROVIDERS: tuple[tuple[str, str], ...] = (
@@ -137,6 +141,37 @@ class TelegramService:
             rows.append(row)
         return rows
 
+    def _transfer_button_label(self, user_ref: str, code: str) -> str:
+        """Account code + current balance for transfer pickers (Telegram button text max 64 chars)."""
+        try:
+            minor = self.ledger_service.repository.get_account_balance_minor(user_ref, code)
+        except Exception:
+            minor = 0
+        bal = f"₹{minor / 100:,.2f}"
+        label = f"{code} · {bal}"
+        if len(label) > 64:
+            label = f"{code[:28]}… · {bal}"[:64]
+        return label
+
+    def _transfer_account_pick_keyboard(self, user_ref: str, prefix: str) -> list[list[dict]] | None:
+        """Inline buttons for selecting source/destination transfer accounts (with balances)."""
+        accounts = self.ledger_service.list_setup_funding_accounts(user_ref)
+        if not accounts:
+            return None
+        rows: list[list[dict]] = []
+        for i in range(0, len(accounts), 2):
+            row = []
+            for j in range(i, min(i + 2, len(accounts))):
+                a = accounts[j]
+                code = str(a["code"])
+                typ = str(a.get("account_type") or "asset")
+                cb = f"{prefix}:{code}:{typ}"
+                if len(cb.encode("utf-8")) <= 64:
+                    row.append({"text": self._transfer_button_label(user_ref, code), "callback_data": cb})
+            if row:
+                rows.append(row)
+        return rows or None
+
     def _upi_provider_keyboard(self) -> list[list[dict]]:
         """Inline buttons for apps the system recognises on receipts (matches NLP UPI labels)."""
         rows: list[list[dict]] = []
@@ -191,6 +226,13 @@ class TelegramService:
         payload.pop("funding_account_code", None)
         payload.pop("funding_account_type", None)
         payload.pop("pending_expense_partial", None)
+
+    @staticmethod
+    def _clear_transfer_wizard_payload(payload: dict) -> None:
+        payload.pop("pending_transfer_from_code", None)
+        payload.pop("pending_transfer_from_type", None)
+        payload.pop("pending_transfer_to_code", None)
+        payload.pop("pending_transfer_to_type", None)
 
     @staticmethod
     def _clear_opening_balance_pick_payload(payload: dict) -> None:
@@ -450,7 +492,7 @@ class TelegramService:
         if not onboarding["ready"]:
             await self.send_message(
                 chat_id,
-                "Finish account setup first — tap /start and add at least one account with last 4 digits.",
+                "Finish account setup first — tap /start and add a bank/card (last 4 digits) or Add Cash.",
             )
             return
         result = self.ledger_service.post_income(
@@ -532,7 +574,7 @@ class TelegramService:
         if not onboarding["ready"]:
             await self.send_message(
                 chat_id,
-                "Finish account setup first — tap /start and add at least one account with last 4 digits.",
+                "Finish account setup first — tap /start and add a bank/card (last 4 digits) or Add Cash.",
             )
             return
         result = self.ledger_service.post_expense(
@@ -753,8 +795,16 @@ class TelegramService:
             return {"status": "ok", "message": "expense_post_failed"}
         return {"status": "ok", "message": "expense_posted"}
 
-    async def send_message(self, chat_id: int, text: str, keyboard: list[list[dict]] | None = None) -> None:
+    async def send_message(
+        self,
+        chat_id: int,
+        text: str,
+        keyboard: list[list[dict]] | None = None,
+        parse_mode: str | None = None,
+    ) -> None:
         payload: dict = {"chat_id": chat_id, "text": text}
+        if parse_mode:
+            payload["parse_mode"] = parse_mode
         if keyboard:
             payload["reply_markup"] = {"inline_keyboard": keyboard}
 
@@ -877,6 +927,9 @@ class TelegramService:
                 {"text": "Accounts", "callback_data": "acct:list"},
             ],
             [
+                {"text": "Open Reports Dashboard", "callback_data": "dash:web_reports"},
+            ],
+            [
                 {"text": "Add bank / Link UPI", "callback_data": "dash:setup_menu"},
             ],
         ]
@@ -888,11 +941,11 @@ class TelegramService:
     def _onboarding_prompt_text() -> str:
         return (
             "Set up Fold:\n"
-            "1) Add one or more bank / card accounts (last 4 digits each). You can add 2–3 banks over time.\n"
+            "1) Add bank / card accounts (last 4 digits each), and/or “Add Cash” with how much physical cash you have.\n"
             "2) Link each UPI app (GPay, PhonePe, …) to the bank account it spends from — "
             "so receipt imports pick the right funding account.\n"
             "Digital banks (Slice, Jupiter, Fi) use “Add Digital Bank”.\n"
-            "When at least one account is saved, tap Done."
+            "When at least one account or cash is saved, tap Done."
         )
 
     def _onboarding_keyboard(self) -> list[list[dict]]:
@@ -901,6 +954,7 @@ class TelegramService:
                 {"text": "Add Bank Account", "callback_data": "setup:add_bank"},
                 {"text": "Add Digital Bank", "callback_data": "setup:add_digital"},
             ],
+            [{"text": "Add Cash", "callback_data": "setup:add_cash"}],
             [{"text": "Link UPI App", "callback_data": "setup:link_upi"}],
             [{"text": "Done", "callback_data": "setup:done"}],
         ]
@@ -912,6 +966,7 @@ class TelegramService:
                 {"text": "Add Bank Account", "callback_data": "setup:add_bank"},
                 {"text": "Add Digital Bank", "callback_data": "setup:add_digital"},
             ],
+            [{"text": "Add Cash", "callback_data": "setup:add_cash"}],
             [{"text": "Link UPI App", "callback_data": "setup:link_upi"}],
             [{"text": "Back to menu", "callback_data": "dash:start"}],
         ]
@@ -952,6 +1007,9 @@ class TelegramService:
                     "awaiting_upi_account_pick",
                     "awaiting_upi_profile_name",
                     "awaiting_upi_handle",
+                    "awaiting_transfer_from_pick",
+                    "awaiting_transfer_to_pick",
+                    "awaiting_transfer_amount",
                     "awaiting_expense_entry",
                     "awaiting_expense_amount",
                 ):
@@ -959,6 +1017,7 @@ class TelegramService:
                     payload.pop("setup_kind", None)
                     self._clear_upi_wizard_payload(payload)
                     self._clear_opening_balance_pick_payload(payload)
+                    self._clear_transfer_wizard_payload(payload)
                     self._clear_expense_wizard(telegram_user_id, payload)
                     self._save_session(telegram_user_id, "idle", payload)
                     flow_state = "idle"
@@ -969,6 +1028,7 @@ class TelegramService:
                 payload.pop("setup_kind", None)
                 self._clear_upi_wizard_payload(payload)
                 self._clear_opening_balance_pick_payload(payload)
+                self._clear_transfer_wizard_payload(payload)
                 self._clear_expense_wizard(telegram_user_id, payload)
                 self._save_session(telegram_user_id, "idle", payload)
                 onboarding = self.ledger_service.get_onboarding_status(user_ref)
@@ -978,7 +1038,8 @@ class TelegramService:
 
             flow_in_onboarding = flow_state in self._ONBOARDING_FLOW_STATES
             flow_in_expense = flow_state in self._EXPENSE_FLOW_STATES
-            if (flow_in_onboarding or flow_in_expense) and text.startswith("/") and text not in (
+            flow_in_transfer = flow_state in self._TRANSFER_FLOW_STATES
+            if (flow_in_onboarding or flow_in_expense or flow_in_transfer) and text.startswith("/") and text not in (
                 "/cancel",
                 "/start",
                 "/add",
@@ -994,6 +1055,7 @@ class TelegramService:
                 payload.pop("setup_kind", None)
                 self._clear_upi_wizard_payload(payload)
                 self._clear_opening_balance_pick_payload(payload)
+                self._clear_transfer_wizard_payload(payload)
                 self._clear_expense_wizard(telegram_user_id, payload)
                 self._save_session(telegram_user_id, "idle", payload)
                 flow_state = "idle"
@@ -1064,6 +1126,67 @@ class TelegramService:
                     update=update,
                 )
 
+            if flow_state == "awaiting_transfer_amount":
+                if not raw_text or raw_text.startswith("/"):
+                    await self.send_message(
+                        chat_id,
+                        "Step 3/3: Send transfer amount in INR (e.g. 500 or 2500.75). Or /cancel.",
+                    )
+                    return {"status": "ok", "message": "transfer_need_amount"}
+                cleaned = raw_text.strip().lower().replace("₹", "").replace("rs.", "").replace("rs", "").replace(",", "")
+                m = re.search(r"\d+(?:\.\d+)?", cleaned)
+                if not m:
+                    await self.send_message(
+                        chat_id,
+                        "Couldn't parse amount. Send a number like 500 or 2500.75. Or /cancel.",
+                    )
+                    return {"status": "ok", "message": "transfer_bad_amount"}
+                amount = float(m.group())
+                from_code = payload.get("pending_transfer_from_code")
+                from_type = payload.get("pending_transfer_from_type")
+                to_code = payload.get("pending_transfer_to_code")
+                to_type = payload.get("pending_transfer_to_type")
+                if not (from_code and from_type and to_code and to_type):
+                    self._clear_transfer_wizard_payload(payload)
+                    self._save_session(telegram_user_id, "idle", payload)
+                    await self.send_message(chat_id, "Transfer session expired. Tap Transfer again from dashboard.")
+                    return {"status": "ok", "message": "transfer_expired"}
+                if from_code == to_code:
+                    await self.send_message(chat_id, "From and To accounts cannot be same. Tap Transfer and try again.")
+                    return {"status": "ok", "message": "transfer_same_accounts"}
+                try:
+                    result = self.ledger_service.post_transfer(
+                        TransferRequest(
+                            user_ref=user_ref,
+                            source="telegram",
+                            description=f"Transfer {from_code} -> {to_code}",
+                            amount=amount,
+                            from_account_code=str(from_code),
+                            from_account_type=str(from_type),  # type: ignore[arg-type]
+                            to_account_code=str(to_code),
+                            to_account_type=str(to_type),  # type: ignore[arg-type]
+                            external_ref=str(update.get("update_id")),
+                        )
+                    )
+                except ValueError as exc:
+                    await self.send_message(chat_id, str(exc))
+                    return {"status": "ok", "message": "transfer_failed"}
+                self._clear_transfer_wizard_payload(payload)
+                self._save_session(telegram_user_id, "idle", payload)
+                await self.send_message(
+                    chat_id,
+                    f"Recorded transfer ₹{amount:,.2f}: {from_code} -> {to_code}. Journal #{result['journal_id']}.",
+                    keyboard=self._start_keyboard(),
+                )
+                return {"status": "ok", "message": "transfer_posted"}
+
+            if flow_state in ("awaiting_transfer_from_pick", "awaiting_transfer_to_pick"):
+                await self.send_message(
+                    chat_id,
+                    "Please tap account buttons for Transfer selection above. Or /cancel.",
+                )
+                return {"status": "ok", "message": "transfer_need_button"}
+
             if flow_state == "idle":
                 kind = self._expense_message_kind(message)
                 if kind in ("voice", "audio", "photo", "image_doc", "audio_doc"):
@@ -1071,7 +1194,7 @@ class TelegramService:
                     if not onboarding["ready"]:
                         await self.send_message(
                             chat_id,
-                            "Finish setup first — tap /start and add at least one account (last 4 digits). "
+                            "Finish setup first — tap /start and add a bank/card or Add Cash. "
                             "Then you can send receipts or audio without picking funding first.",
                             keyboard=self._onboarding_keyboard(),
                         )
@@ -1181,13 +1304,18 @@ class TelegramService:
                 onboarding = self.ledger_service.get_onboarding_status(user_ref)
                 kb = self._start_keyboard() if onboarding["ready"] else self._onboarding_keyboard()
                 if from_wizard and label:
+                    suffix = f" ending {last4_disp}" if last4_disp else ""
                     await self.send_message(
                         chat_id,
                         f"{opener_msg}\n\n"
-                        f"Saved: {label} (code {code}) ending {last4_disp or '****'}.\n\n"
-                        "Optional: open the main menu → “Add bank / Link UPI” to connect GPay/PhonePe to this account, "
-                        "or add another bank.\n"
-                        "Use the buttons below.",
+                        f"Saved: {label} (code {code}){suffix}.\n\n"
+                        + (
+                            "Optional: open the main menu → “Add bank / Link UPI” to connect GPay/PhonePe to an account, "
+                            "or add another bank.\n"
+                            "Use the buttons below."
+                            if code != CASH_WALLET_CODE
+                            else "Use the buttons below to log expenses against Cash or add a bank."
+                        ),
                         keyboard=kb,
                     )
                 else:
@@ -1350,12 +1478,17 @@ class TelegramService:
                 description = parts[2]
                 funding_code = payload.get("funding_account_code")
                 funding_type = payload.get("funding_account_type")
-                payment_provider = payload.get("payment_provider")
+                session_payment_provider = payload.get("payment_provider")
+                extract = self._extract_from_text(f"{parts[1]} {description}".strip())
+                ex_pm = extract.get("payment_method")
+                ex_cat = extract.get("category")
+                ex_prov = extract.get("payment_provider")
+                payment_provider = (str(ex_prov).lower() if ex_prov else None) or session_payment_provider
                 onboarding = self.ledger_service.get_onboarding_status(user_ref)
                 if not onboarding["ready"]:
                     await self.send_message(
                         chat_id,
-                        "Please finish account setup first. Use /start and add at least one account with last 4 digits.",
+                        "Please finish account setup first. Use /start and add a bank/card or Add Cash.",
                     )
                     return {"status": "ok", "message": "onboarding_required"}
                 try:
@@ -1369,6 +1502,8 @@ class TelegramService:
                             funding_account_type=funding_type,
                             amount=amount,
                             external_ref=str(update.get("update_id")),
+                            category=str(ex_cat) if ex_cat else None,
+                            payment_method=str(ex_pm) if ex_pm else None,
                             payment_provider=payment_provider,
                         )
                     )
@@ -1677,6 +1812,22 @@ class TelegramService:
                     "Send the last 4 digits shown for that account/card.\n"
                     "Or /cancel.",
                 )
+            elif data.startswith("setup:add_cash"):
+                session = self._get_session(telegram_user_id)
+                session_payload = dict(session.get("payload_json") or {})
+                self.ledger_service.ensure_cash_wallet_account(user_ref)
+                session_payload["pending_opening_account_code"] = CASH_WALLET_CODE
+                session_payload["pending_opening_account_label"] = "Cash on hand"
+                session_payload["pending_opening_from_wizard"] = True
+                session_payload.pop("pending_opening_last4", None)
+                self._save_session(telegram_user_id, "awaiting_account_opening_balance", session_payload)
+                await self.send_message(
+                    chat_id,
+                    "Add Cash — how much physical cash do you have right now (INR)?\n"
+                    "Reply with a number only (e.g. 5000), or 0 / skip if you are not tracking an opening amount yet.\n"
+                    "You can set or change this later from “Opening balance” on the dashboard.\n"
+                    "Or /cancel.",
+                )
             elif data.startswith("setup:link_upi"):
                 session = self._get_session(telegram_user_id)
                 session_payload = dict(session.get("payload_json") or {})
@@ -1739,7 +1890,8 @@ class TelegramService:
                 if not onboarding["ready"]:
                     await self.send_message(
                         chat_id,
-                        "Add at least one account (last 4 digits) first. You can add more banks later from “Add bank / Link UPI”.",
+                        "Add at least one bank/card (last 4 digits) or tap “Add Cash” first. "
+                        "You can add more later from “Add bank / Link UPI”.",
                         keyboard=self._onboarding_keyboard(),
                     )
                 else:
@@ -1770,7 +1922,81 @@ class TelegramService:
             elif data.startswith("dash:add_investment"):
                 await self.send_message(chat_id, "Use /investment <amount> <description> to record investment.")
             elif data.startswith("dash:transfer"):
-                await self.send_message(chat_id, "Use /transfer <amount> <from_account_code> <to_account_code>.")
+                kb = self._transfer_account_pick_keyboard(user_ref, "xferfrom")
+                if not kb:
+                    await self.send_message(
+                        chat_id,
+                        "No setup accounts found. Add bank / card first, then Transfer.",
+                        keyboard=self._setup_menu_keyboard(),
+                    )
+                else:
+                    session = self._get_session(telegram_user_id)
+                    session_payload = dict(session.get("payload_json") or {})
+                    self._clear_transfer_wizard_payload(session_payload)
+                    self._save_session(telegram_user_id, "awaiting_transfer_from_pick", session_payload)
+                    await self.send_message(
+                        chat_id,
+                        "Transfer — Step 1/3\nSelect FROM account:",
+                        keyboard=kb,
+                    )
+            elif data.startswith("xferfrom:"):
+                parts = data.split(":", 2)
+                if len(parts) < 3:
+                    await self.send_message(chat_id, "Invalid selection. Tap Transfer again.")
+                    await self.answer_callback_query(cbq_id)
+                    return {"status": "ok", "message": "transfer_from_bad_cb"}
+                _, from_code, from_type = parts
+                session = self._get_session(telegram_user_id)
+                if session.get("state") != "awaiting_transfer_from_pick":
+                    await self.send_message(chat_id, "No transfer in progress. Tap Transfer from dashboard.")
+                    await self.answer_callback_query(cbq_id)
+                    return {"status": "ok", "message": "transfer_wrong_state_from"}
+                session_payload = dict(session.get("payload_json") or {})
+                session_payload["pending_transfer_from_code"] = from_code
+                session_payload["pending_transfer_from_type"] = from_type
+                to_kb = self._transfer_account_pick_keyboard(user_ref, "xferto")
+                self._save_session(telegram_user_id, "awaiting_transfer_to_pick", session_payload)
+                await self.send_message(
+                    chat_id,
+                    f"Transfer — Step 2/3\nFrom: {from_code}\nSelect TO account:",
+                    keyboard=to_kb,
+                )
+            elif data.startswith("xferto:"):
+                parts = data.split(":", 2)
+                if len(parts) < 3:
+                    await self.send_message(chat_id, "Invalid selection. Tap Transfer again.")
+                    await self.answer_callback_query(cbq_id)
+                    return {"status": "ok", "message": "transfer_to_bad_cb"}
+                _, to_code, to_type = parts
+                session = self._get_session(telegram_user_id)
+                if session.get("state") != "awaiting_transfer_to_pick":
+                    await self.send_message(chat_id, "No transfer in progress. Tap Transfer from dashboard.")
+                    await self.answer_callback_query(cbq_id)
+                    return {"status": "ok", "message": "transfer_wrong_state_to"}
+                session_payload = dict(session.get("payload_json") or {})
+                from_code = session_payload.get("pending_transfer_from_code")
+                if from_code and str(from_code) == to_code:
+                    await self.send_message(chat_id, "From and To accounts cannot be same. Choose another TO account.")
+                    await self.answer_callback_query(cbq_id)
+                    return {"status": "ok", "message": "transfer_same_pick"}
+                session_payload["pending_transfer_to_code"] = to_code
+                session_payload["pending_transfer_to_type"] = to_type
+                self._save_session(telegram_user_id, "awaiting_transfer_amount", session_payload)
+                await self.send_message(
+                    chat_id,
+                    f"Transfer — Step 3/3\nFrom: {from_code}\nTo: {to_code}\nReply with amount in INR (e.g. 500). Or /cancel.",
+                )
+            elif data.startswith("dash:web_reports"):
+                from api.services.web_auth_service import issue_magic_token
+                token = issue_magic_token(telegram_user_id)
+                web_base = os.getenv("FOLD_WEB_BASE_URL", "http://localhost:3000")
+                link = f"{web_base}/?token={token}"
+                await self.send_message(
+                    chat_id,
+                    f"Open your reports dashboard (link valid 5 min):\n{link}",
+                )
+                await self.answer_callback_query(cbq_id)
+                return {"status": "ok", "message": "web_reports_link_sent"}
             elif data.startswith("dash:balance"):
                 balances = self.ledger_service.get_cash_snapshot(user_ref=user_ref)
                 if not balances:
@@ -1780,12 +2006,19 @@ class TelegramService:
                     for row in balances:
                         lines.append(f"  {row['code']}: ₹{row['balance_minor'] / 100:,.2f}")
                     await self.send_message(chat_id, "\n".join(lines))
-            elif data.startswith("report:weekly"):
-                bundle = self.ledger_service.get_enriched_period_report(user_ref, "weekly")
-                await self.send_message(chat_id, self._message_text_enriched_report(bundle))
-            elif data.startswith("report:monthly"):
-                bundle = self.ledger_service.get_enriched_period_report(user_ref, "monthly")
-                await self.send_message(chat_id, self._message_text_enriched_report(bundle))
+            elif data.startswith("report:weekly") or data.startswith("report:monthly"):
+                from api.services.web_auth_service import issue_magic_token
+                rpt_period = "weekly" if data.startswith("report:weekly") else "monthly"
+                token = issue_magic_token(telegram_user_id)
+                web_base = os.getenv("FOLD_WEB_BASE_URL", "http://localhost:3000")
+                link = f"{web_base}/?token={token}&period={rpt_period}"
+                label = "Weekly" if rpt_period == "weekly" else "Monthly"
+                await self.send_message(
+                    chat_id,
+                    f"Open your {label.lower()} report (link valid 5 min):\n{link}",
+                )
+                await self.answer_callback_query(cbq_id)
+                return {"status": "ok", "message": f"{rpt_period}_report_link_sent"}
             elif data.startswith("acct:list"):
                 real = self.ledger_service.list_setup_funding_accounts(user_ref)
                 primary = self.ledger_service.describe_primary_funding(user_ref)
@@ -1869,6 +2102,8 @@ class TelegramService:
                 return {"status": "ok", "message": "opening_chosen"}
             elif data.startswith("acct:funding:"):
                 _, _, code, acc_type = data.split(":", 3)
+                if code == CASH_WALLET_CODE:
+                    self.ledger_service.ensure_cash_wallet_account(user_ref)
                 session = self._get_session(telegram_user_id)
                 existing_payload = dict(session.get("payload_json") or {})
                 existing_payload["funding_account_code"] = code

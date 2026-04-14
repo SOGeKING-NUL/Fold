@@ -535,6 +535,44 @@ class LedgerRepository:
                 cur.execute(query, (external_user_ref, days))
                 return cur.fetchall()
 
+    def get_daily_trend(self, external_user_ref: str, days: int) -> list[dict]:
+        with get_db_connection() as conn:
+            with conn.cursor(row_factory=dict_row) as cur:
+                cur.execute(
+                    """
+                    SELECT
+                        d.day::date AS day,
+                        COALESCE(SUM(CASE WHEN jt.transaction_type = 'expense' THEN le.amount_minor ELSE 0 END), 0) AS expense_minor,
+                        COALESCE(SUM(CASE WHEN jt.transaction_type = 'income'  THEN le.amount_minor ELSE 0 END), 0) AS income_minor
+                    FROM generate_series(
+                        (NOW() - (%s::text || ' days')::interval)::date,
+                        NOW()::date,
+                        '1 day'::interval
+                    ) AS d(day)
+                    LEFT JOIN users u ON u.external_user_ref = %s
+                    LEFT JOIN journal_transactions jt
+                        ON jt.user_id = u.id
+                        AND jt.occurred_at::date = d.day::date
+                        AND jt.transaction_type IN ('expense', 'income')
+                    LEFT JOIN ledger_entries le
+                        ON le.journal_transaction_id = jt.id
+                        AND (
+                            (jt.transaction_type = 'income'  AND le.direction = 'debit') OR
+                            (jt.transaction_type = 'expense' AND le.direction = 'debit')
+                        )
+                    LEFT JOIN accounts a
+                        ON a.id = le.account_id
+                        AND (
+                            (jt.transaction_type = 'income'  AND a.account_type = 'asset') OR
+                            (jt.transaction_type = 'expense' AND a.account_type = 'expense')
+                        )
+                    GROUP BY d.day
+                    ORDER BY d.day
+                    """,
+                    (days, external_user_ref),
+                )
+                return cur.fetchall()
+
     def get_session(self, telegram_user_id: int) -> dict | None:
         with get_db_connection() as conn:
             with conn.cursor(row_factory=dict_row) as cur:

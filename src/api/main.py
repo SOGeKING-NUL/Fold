@@ -25,9 +25,11 @@ if SRC_DIR not in sys.path:
     sys.path.insert(0, SRC_DIR)
 
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from api.routes import router
 from api.controllers.ledger_controller import router as ledger_router
 from api.controllers.telegram_controller import router as telegram_router
+from api.controllers.web_controller import router as web_router
 from api.config import get_settings
 from api.db.connection import run_migrations
 from api.services.telegram_service import register_telegram_bot_commands
@@ -43,10 +45,21 @@ app = FastAPI(
     version="1.0.0",
 )
 
+# ─── CORS for Next.js dashboard ─────────────────────────────────────────
+_web_origins = os.getenv("FOLD_WEB_ORIGINS", "http://localhost:3000").split(",")
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[o.strip() for o in _web_origins if o.strip()],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 # ─── Register Routes ────────────────────────────────────────────────────
 app.include_router(router)
 app.include_router(ledger_router)
 app.include_router(telegram_router)
+app.include_router(web_router)
 
 
 @app.on_event("startup")

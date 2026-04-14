@@ -35,6 +35,11 @@ POOLED_EXPENSE_CODE = "expense_operating"
 POOLED_INCOME_CODE = "income_operating"
 POOLED_INVESTMENT_CODE = "investment_portfolio"
 
+# Physical cash pocket / wallet — use this code so balances and transfers stay consistent.
+CASH_WALLET_CODE = "cash_wallet"
+# Sentinel last4: real bank cards should use other digits; cash uses 0000 for onboarding/listing.
+CASH_PLACEHOLDER_LAST4 = "0000"
+
 
 @dataclass
 class ExpenseRequest:
@@ -158,6 +163,20 @@ class LedgerService:
             self._maybe_seed_primary_from_single_account(payload.user_ref)
         return account
 
+    def ensure_cash_wallet_account(self, user_ref: str) -> dict:
+        """Create or refresh the physical cash asset (listed with banks; balances enforced on spend)."""
+        return self.upsert_account(
+            AccountUpsertRequest(
+                user_ref=user_ref,
+                code=CASH_WALLET_CODE,
+                name="Cash on hand",
+                account_type="asset",
+                institution_name="Cash",
+                account_number_last4=CASH_PLACEHOLDER_LAST4,
+                is_digital=False,
+            )
+        )
+
     def resolve_primary_cash_account(
         self, user_ref: str, *, spending: bool = True
     ) -> tuple[str, AccountType] | None:
@@ -217,6 +236,18 @@ class LedgerService:
             return f"{code} ({typ})"
         return None
 
+    @staticmethod
+    def _normalize_expense_payment_method(payment_method: str | None) -> str | None:
+        """Canonical instrument from NLP/API; None when unspecified or unknown."""
+        if payment_method is None:
+            return None
+        x = str(payment_method).strip().lower()
+        if x in ("", "unknown", "none", "null"):
+            return None
+        if x in ("cash", "card", "upi"):
+            return x
+        return None
+
     def post_expense(self, payload: ExpenseRequest) -> dict:
         amount_minor = self._to_minor(payload.amount)
         funding_code = payload.funding_account_code
@@ -234,15 +265,41 @@ class LedgerService:
                     funding_code = by_last4["code"]
                     funding_type = by_last4["account_type"]
                     resolved_from_receipt = True
-        if not resolved_from_receipt and payload.payment_provider:
-            linked = self.repository.resolve_linked_account_for_provider(
-                user_ref=payload.user_ref,
-                profile_type="upi",
-                provider=payload.payment_provider,
-            )
-            if linked:
-                funding_code = linked["code"]
-                funding_type = linked["account_type"]
+
+        pm = self._normalize_expense_payment_method(payload.payment_method)
+        if not resolved_from_receipt:
+            if pm == "cash":
+                self.ensure_cash_wallet_account(payload.user_ref)
+                funding_code = CASH_WALLET_CODE
+                funding_type = "asset"
+            elif pm == "card":
+                funding_code = "card_liability"
+                funding_type = "liability"
+            elif pm == "upi" and payload.payment_provider:
+                linked = self.repository.resolve_linked_account_for_provider(
+                    user_ref=payload.user_ref,
+                    profile_type="upi",
+                    provider=payload.payment_provider,
+                )
+                if linked:
+                    funding_code = linked["code"]
+                    funding_type = linked["account_type"]
+                else:
+                    funding_code = "upi_wallet"
+                    funding_type = "asset"
+            elif payload.payment_provider:
+                linked = self.repository.resolve_linked_account_for_provider(
+                    user_ref=payload.user_ref,
+                    profile_type="upi",
+                    provider=payload.payment_provider,
+                )
+                if linked:
+                    funding_code = linked["code"]
+                    funding_type = linked["account_type"]
+            elif pm == "upi":
+                funding_code = "upi_wallet"
+                funding_type = "asset"
+
         if funding_code is None or funding_type is None:
             resolved = self.resolve_primary_cash_account(payload.user_ref, spending=True)
             if resolved is None:

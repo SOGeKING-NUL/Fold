@@ -71,6 +71,8 @@ class LedgerPostRequest(BaseModel):
     funding_account_type: Optional[AccountType] = None
     source: str = "manual"
     external_ref: Optional[str] = None
+    category: Optional[str] = None
+    payment_method: Optional[str] = None
     payment_provider: Optional[str] = None
     receipt_account_last4: Optional[str] = None
     receipt_institution_hint: Optional[str] = None

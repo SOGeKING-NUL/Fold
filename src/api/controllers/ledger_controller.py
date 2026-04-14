@@ -44,6 +44,8 @@ async def post_expense(request: LedgerPostRequest):
                 funding_account_type=request.funding_account_type,
                 amount=request.amount,
                 external_ref=request.external_ref,
+                category=request.category,
+                payment_method=request.payment_method,
                 payment_provider=request.payment_provider,
                 receipt_account_last4=request.receipt_account_last4,
                 receipt_institution_hint=request.receipt_institution_hint,
