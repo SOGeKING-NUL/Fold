@@ -8,6 +8,8 @@ astor==0.8.1
 asttokens==3.0.1
 bce-python-sdk==0.9.68
 beautifulsoup4==4.14.3
+boto3==1.42.89
+botocore==1.42.89
 certifi==2026.2.25
 chardet==7.4.0.post2
 charset-normalizer==3.4.7

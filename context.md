@@ -2,7 +2,7 @@
 
 This is the single source of truth for the Fold backend and frontend architecture. It describes what is built, why it was built that way, how each subsystem works, and what is still planned.
 
-Last updated: **2026-04-14** (after v3 NLP model deployment).
+Last updated: **2026-04-14** (after cloud VLM extraction pivot).
 
 ---
 
@@ -43,8 +43,9 @@ Fold is a multi-modal expense tracking system optimized for Indian/Hinglish usag
 |---|---|
 | **Backend** | Python 3.11 · FastAPI · Uvicorn |
 | **Database** | PostgreSQL (Supabase-hosted) · psycopg 3 |
-| **NLP** | DistilBERT (fine-tuned, multi-head v3) · PyTorch · HuggingFace Transformers |
-| **OCR** | PaddleOCR 2.10 (PaddlePaddle 2.6.2) |
+| **Extraction** | AWS Bedrock (Amazon Nova Lite VLM) · boto3 |
+| **NLP Fallback** | Regex-based extraction (amount, payment, bank keywords) |
+| **OCR Fallback** | PaddleOCR 2.10 (PaddlePaddle 2.6.2) — used only when Bedrock disabled |
 | **STT** | OpenAI Whisper (local, `small` model) |
 | **UPI Detection** | Roboflow Inference API |
 | **Frontend** | Next.js 16 · React 19 · Tailwind CSS 4 · Recharts |
@@ -57,19 +58,21 @@ Fold is a multi-modal expense tracking system optimized for Indian/Hinglish usag
 ```mermaid
 flowchart TD
     subgraph Inputs
-        TG[Telegram User]
-        WEB[Web Dashboard]
-        API[API Client]
+        TG[TelegramUser]
+        WEB[WebDashboard]
+        API[APIClient]
     end
 
     TG -->|webhook| WEBHOOK["/api/v1/webhooks/telegram"]
     WEBHOOK --> TG_SVC[TelegramService]
 
-    TG_SVC -->|text| NLP[NLP Extractor]
-    TG_SVC -->|voice .ogg| STT[Whisper STT] --> NLP
-    TG_SVC -->|image| ROBO[Roboflow UPI Detector] --> OCR[PaddleOCR] --> NLP
+    TG_SVC -->|text| CLOUD[CloudExtractor_Bedrock]
+    TG_SVC -->|voice .ogg| STT[WhisperSTT] --> CLOUD
+    TG_SVC -->|image| CLOUD
 
-    TG_SVC --> LEDGER_SVC[LedgerService]
+    CLOUD -->|"fail/disabled"| FALLBACK[LocalRegexFallback]
+    FALLBACK --> LEDGER_SVC[LedgerService]
+    CLOUD --> LEDGER_SVC
 
     WEB -->|session cookie| WEB_CTRL["/api/v1/web/*"]
     WEB_CTRL --> LEDGER_SVC
@@ -87,12 +90,14 @@ flowchart TD
 
 1. Telegram sends a webhook POST to `/api/v1/webhooks/telegram`.
 2. `TelegramService.handle_update()` dispatches by message type (text command, voice, photo, callback query).
-3. For voice/image: the media file is downloaded, processed through STT/OCR, then passed to NLP.
-4. NLP returns `{amount, category, payment_method, payment_provider, bank_account, cash_flow}`.
-5. `TelegramService` builds an `ExpenseRequest` and calls `LedgerService.post_expense()`.
-6. `LedgerService` resolves the funding account, converts to minor units, validates, and calls `LedgerRepository.create_balanced_journal()`.
-7. The repository posts a journal header + 2 ledger entries (debit expense, credit funding) in a single DB transaction.
-8. The bot replies with amount, description, category, paid-from account, and journal ID.
+3. For images: image bytes are sent directly to AWS Bedrock VLM for end-to-end extraction (amount, category, payment method, bank, cash flow).
+4. For voice: Whisper transcribes audio, then transcript is sent to Bedrock for extraction.
+5. For text: text is sent to Bedrock for extraction.
+6. If Bedrock fails (throttled, disabled, network): automatic fallback to local regex extraction (and legacy OCR for images).
+7. `TelegramService` builds an `ExpenseRequest` and calls `LedgerService.post_expense()`.
+8. `LedgerService` resolves the funding account, converts to minor units, validates, and calls `LedgerRepository.create_balanced_journal()`.
+9. The repository posts a journal header + 2 ledger entries (debit expense, credit funding) in a single DB transaction.
+10. The bot replies with amount, description, category, paid-from account, and journal ID.
 
 ---
 
@@ -127,21 +132,14 @@ Fold/
 │   │       ├── telegram_service.py     # Bot command/callback handling
 │   │       └── web_auth_service.py     # Magic-link auth + sessions
 │   ├── nlp/
-│   │   ├── inference.py                # TransactionExtractor (v1 + v3)
-│   │   ├── augment_dataset.py          # v1/v2 dataset generator
-│   │   ├── augment_dataset_v3.py       # v3 dataset generator (42.5k rows)
-│   │   ├── model.ipynb                 # v1 training notebook
-│   │   ├── model_v3.ipynb              # v3 multi-head training notebook
+│   │   ├── cloud_extractor.py          # AWS Bedrock VLM extraction (primary)
+│   │   ├── inference.py                # Local regex fallback extractor
 │   │   ├── category_overrides.json     # User correction memory
-│   │   ├── eda_dataset_v2.csv          # v2 training data
-│   │   ├── eda_dataset_v3.csv          # v3 training data (current)
-│   │   └── my_finetuned_distilbert_v3/ # Deployed model checkpoint
-│   │       ├── config.json
-│   │       ├── model.safetensors       # DistilBERT encoder weights
-│   │       ├── heads.pt               # 3 classification head weights
-│   │       ├── label_maps_v3.json      # Index → label mappings
-│   │       ├── tokenizer.json
-│   │       └── tokenizer_config.json
+│   │   ├── augment_dataset.py          # v1/v2 dataset generator (archived)
+│   │   ├── augment_dataset_v3.py       # v3 dataset generator (archived)
+│   │   ├── model.ipynb                 # v1 training notebook (archived)
+│   │   ├── model_v3.ipynb              # v3 training notebook (archived)
+│   │   └── my_finetuned_distilbert_v3/ # Trained model checkpoint (archived)
 │   ├── ocr/
 │   │   ├── extractor.py            # PaddleOCR receipt pipeline
 │   │   ├── amount_plausibility.py  # Numeric false-positive filters
@@ -195,6 +193,10 @@ Settings are loaded from `.env` at project root. The loader prefers `.env` value
 | `TELEGRAM_WEBHOOK_SECRET` | No | Validates `X-Telegram-Bot-Api-Secret-Token` header |
 | `ROBOFLOW_API_KEY` | No | Roboflow inference API key |
 | `ROBOFLOW_UPI_MODEL_ID` | No | Model ID for UPI logo detection (default: `document-classification/upi/1`) |
+| `BEDROCK_ENABLED` | No | Enable AWS Bedrock cloud extraction (`true`/`false`) |
+| `BEDROCK_REGION` | No | AWS region for Bedrock (default: `ap-south-1`) |
+| `BEDROCK_MODEL_ID` | No | Bedrock model/inference-profile ID (default: `apac.amazon.nova-lite-v1:0`) |
+| `BEDROCK_TIMEOUT_SECONDS` | No | Bedrock invoke timeout (default: `30`) |
 | `MAX_TRANSACTION_INR` | No | Per-transaction cap in INR (default: `1,000,000`) |
 | `FOLD_RESET_DATABASE` | No | Set to `1` for one-time destructive schema reset |
 | `FOLD_WEB_ORIGINS` | No | Comma-separated CORS origins for Next.js (default: `http://localhost:3000`) |
@@ -232,43 +234,50 @@ Settings are loaded from `.env` at project root. The loader prefers `.env` value
 
 ---
 
-## Extraction Pipeline (OCR / STT / NLP)
+## Extraction Pipeline
 
-### Image Pipeline (Roboflow → OCR → NLP)
+### Primary: AWS Bedrock Cloud VLM
 
-**Files:** `src/ocr/upi_detector.py`, `src/ocr/extractor.py`, `src/nlp/inference.py`
+**File:** `src/nlp/cloud_extractor.py`
 
-1. **Roboflow UPI logo detection** runs first on every image.
-2. **If UPI logo detected:** OCR runs in raw mode (`use_preprocessing=False`) — PaddleOCR's internal CNNs work best on clean screenshots.
-3. **If no UPI logo:** OCR runs with preprocessing (`use_preprocessing=True`) — OpenCV pipeline (grayscale, CLAHE, denoise, sharpen, binarize) for noisy physical receipts.
-4. OCR output goes through spatial sorting (reconstruct lines from bounding boxes) and heuristic filtering (keyword scan for Total/Amount/₹).
-5. `extract_payment_details()` parses amounts and payment modes from filtered lines.
-6. OCR text wall is fed to NLP for category classification and enrichment.
-7. **Merge policy:**
-   - Amount: OCR first, NLP fallback. UPI evidence → NLP amount priority; invoice → OCR amount priority.
-   - Payment method: OCR first, NLP fallback.
-   - Category: NLP always.
-   - Bank account: NLP (v3 model prediction).
+All extraction (text, image, voice transcript) is sent to an AWS Bedrock vision-language model as the primary path. The VLM receives either raw image bytes or text and returns structured JSON with all fields in a single call.
 
-### Voice Pipeline (Whisper → NLP)
+**Why this replaced the OCR+regex+DistilBERT pipeline:**
+- The old pipeline used regex to parse amounts from OCR text, which failed on common patterns like `R500.00` being misread as `25` (date number picked instead of currency amount).
+- A VLM can reason about the full visual/textual context: it sees the large `₹500.00` on a UPI screenshot and ignores nearby date numbers.
+- One model call replaces Roboflow detection → PaddleOCR → spatial sorting → heuristic filtering → regex parsing → DistilBERT classification.
+
+**Model:** Amazon Nova Lite (`apac.amazon.nova-lite-v1:0`) — supports text + image input, no approval form required, available via APAC cross-region inference profile.
+
+**Prompt design:** System prompt with strict rules:
+- `₹`, `Rs`, `R`, `INR` followed by numbers are currency amounts
+- Dates, times, transaction IDs, phone numbers are never amounts
+- Returns JSON with: `amount`, `cash_flow`, `category`, `payment_method`, `payment_provider`, `bank_account`, `description`
+
+### Fallback: Local Regex Extraction
+
+**File:** `src/nlp/inference.py`
+
+When Bedrock is disabled (`BEDROCK_ENABLED=false`) or fails (throttled, network error), the system automatically falls back to lightweight regex-based extraction:
+- Amount: Hindi multiplier words → currency-tagged regex → bare number fallback
+- Payment method: keyword dictionary (UPI/card/cash)
+- UPI provider: keyword mapping (gpay, phonepe, paytm, etc.)
+- Bank account: Indian bank name dictionary
+- Category: `category_overrides.json` keyword memory (no model)
+
+### Voice Pipeline
 
 **File:** `src/stt/transcriber.py`
 
 1. Audio file (.ogg, .wav, .mp3) decoded via FFmpeg.
 2. Whisper `small` model transcribes with `language="hi"` and a Hinglish domain prompt.
-3. Raw transcript passed to NLP extractor.
+3. Transcript sent to cloud VLM (or local fallback) for extraction.
 
-### Text Pipeline (NLP only)
+### Legacy OCR (retained for fallback)
 
-User text goes directly to `TransactionExtractor.extract()`.
+**Files:** `src/ocr/extractor.py`, `src/ocr/amount_plausibility.py`, `src/ocr/cash_flow.py`, `src/ocr/upi_detector.py`
 
-### OCR Support Modules
-
-| Module | Purpose |
-|---|---|
-| `amount_plausibility.py` | Rejects ID-sized numbers, year-in-date-context, and bank-last4 misreads as amounts. `plausible_inr_amount()` enforces a sane range |
-| `cash_flow.py` | Detects expense vs income from UPI phrases ("paid to" → expense, "received from" → income) |
-| `upi_detector.py` | Roboflow HTTP client for UPI app logo detection. Returns logo class and confidence |
+The PaddleOCR pipeline and Roboflow UPI detector are retained in the codebase and used only as the image fallback path when Bedrock is disabled. They are not loaded when Bedrock is active.
 
 ---
 
@@ -483,100 +492,55 @@ Wrong category? Tap Change category.
 
 ---
 
-## NLP Model — Training & Inference
+## Cloud VLM Extraction
 
-### Model Architecture (v3 — current)
+### How It Works
 
-**Multi-head DistilBERT** with a shared encoder and three separate classification heads:
+**File:** `src/nlp/cloud_extractor.py`
 
-```
-DistilBERT Encoder (768-dim CLS token)
-  ├── head_cat    → Linear(768, 10)   [category]
-  ├── head_method → Linear(768, 3)    [payment_method]
-  └── head_bank   → Linear(768, 20)   [bank_account]
-```
+The `CloudExtractor` class uses the AWS Bedrock **Converse API** to send text or image+text to a vision-language model. The system prompt instructs the model to return a strict JSON object with financial fields.
 
-**Training loss:** `CrossEntropy(category) + 0.5 * CrossEntropy(method) + 0.5 * CrossEntropy(bank)`
+**Key prompt rules baked into the system prompt:**
+1. `₹`, `Rs`, `R`, `INR` followed by numbers are currency amounts.
+2. Numbers appearing as dates (25th), times (08:01), transaction IDs, or phone numbers must never be treated as amounts.
+3. For UPI screenshots, the large prominent number is always the amount.
+4. "Paid" = expense, "Received/Credited" = income.
 
-### Label Maps (from `label_maps_v3.json`)
+**Response normalization:**
+- Amount validated as positive float
+- Category constrained to valid set (10 categories + fallback to `misc`)
+- Payment method constrained to `upi`/`card`/`cash`
+- Null-like strings (`"null"`, `"none"`, `"unknown"`) converted to `None`
 
-**Categories (10):** education, emi, entertainment, food, friends, healthcare, investment, shopping, travel, utilities
+### Why Bedrock Instead of SageMaker
 
-**Payment Methods (3):** card, cash, upi
+- SageMaker free-tier provides only CPU instances (`ml.m5.xlarge`) — too slow for VLM inference.
+- GPU instances (`ml.g5.*`) are not in the free tier and cost $1-4/hour.
+- Bedrock is **pay-per-request** (fractions of a cent per call), uses the same AWS credentials, and requires zero infrastructure management.
+- The Converse API is model-agnostic — switching between Nova, Claude, Mistral, or Qwen is a single config change.
 
-**Bank Accounts (20):** axis, bandhan, bob, canara, federal bank, fi, hdfc, icici, idfc, indusind, jupiter, kotak, niyo, pnb, rbl, sbi, slice, union bank, unknown, yes bank
+### Available Models (ap-south-1)
 
-### Inference Flow (`TransactionExtractor.extract()`)
+Configurable via `BEDROCK_MODEL_ID`. Currently using `apac.amazon.nova-lite-v1:0`.
 
-```
-Input text
-  │
-  ├── Regex: amount extraction (Hindi multipliers → currency-tagged → bare number fallback)
-  ├── Regex: payment method keywords (UPI / card / cash)
-  ├── Regex: UPI provider map (gpay, phonepe, paytm, slice, jupiter, fi, niyo, ...)
-  ├── Regex: Indian bank name dictionary
-  ├── Heuristic: cash flow detection (expense vs income)
-  │
-  └── v3 Multi-Head DistilBERT:
-        ├── category prediction
-        ├── payment_method prediction
-        └── bank_account prediction
-  │
-  └── Merge: model predictions are primary; regex fills gaps the model missed
-```
+Other vision-capable models available: Gemma 3 4B/12B/27B, Nemotron Nano 12B, Ministral 3B/8B/14B, Claude (requires use-case form), Qwen3-VL 235B.
 
-**Override system:** Before model inference, `category_overrides.json` is checked for known merchant → category mappings (from user corrections).
+### Legacy NLP (local fallback)
 
-**Fallback:** If v3 model artifacts are not found, inference falls back to the v1 single-head model (category only) with regex for payment/bank.
+**File:** `src/nlp/inference.py`
 
-### Model Files
+The `TransactionExtractor` class is now a lightweight regex-only fallback. All torch/transformers dependencies have been removed. It provides:
+- Amount extraction (Hindi multipliers + currency regex + bare number fallback)
+- Payment method / UPI provider / bank name keyword matching
+- Category from `category_overrides.json` memory (user corrections)
+- Cash flow detection via `src/ocr/cash_flow.py`
 
-| File | Purpose |
-|---|---|
-| `model.safetensors` | DistilBERT encoder weights (265 MB) |
-| `heads.pt` | Three classification head state dicts + dimension metadata |
-| `label_maps_v3.json` | Index → string label mappings for all three heads |
-| `config.json` | DistilBERT architecture config |
-| `tokenizer.json` + `tokenizer_config.json` | Fast tokenizer files |
+### Training Artifacts (archived)
 
-### Dataset (v3)
-
-**Generator:** `src/nlp/augment_dataset_v3.py`
-**Output:** `eda_dataset_v3.csv` — 42,500 rows
-
-**Columns:** `text`, `category`, `payment_method`, `bank_account`, `text_source`
-
-**Data sources in the dataset:**
-- OCR UPI screenshot simulations (with noise, dates, transaction IDs, bank+last4)
-- OCR physical receipt simulations (invoices, bills)
-- Natural Hinglish (component-based assembly, phonetic typos)
-- Natural English (conversational, short-form, bank-statement-like)
-- Voice transcripts (simulated Whisper STT output — run-on, no punctuation)
-- Friend/P2P transaction patterns
-- Strong lexical cue templates per category
-
-**Key dataset improvements over v2:**
-- Added `bank_account` column (20 Indian banks including digital: Slice, Jupiter, Fi, Niyo)
-- Added `text_source` column for provenance tracking
-- Garbled/missing rupee sign variants (₹ → t, ?, missing)
-- Category-aware payment method distributions
-- Hinglish phonetic typo injection
-
-### Training Notebook
-
-**File:** `src/nlp/model_v3.ipynb` — run on Google Colab with GPU
-
-Steps:
-1. Load `eda_dataset_v3.csv`, clean text, normalize labels
-2. LabelEncode category/method/bank, save to `label_maps_v3.json`
-3. Train/validation split, tokenize with DistilBERT tokenizer
-4. Custom training loop: AdamW optimizer, LinearLR scheduler, combined loss
-5. Validate per-head accuracy
-6. Save encoder + heads + label maps to `my_finetuned_distilbert_v3/`
-
-### v1 Model (legacy)
-
-Single-head `AutoModelForSequenceClassification` — category prediction only. Regex handles payment method and bank. Still loadable as fallback if v3 artifacts are missing.
+The DistilBERT v3 model, training notebooks, and dataset generators remain in the repository for reference but are no longer loaded at runtime:
+- `src/nlp/model_v3.ipynb` — multi-head DistilBERT training notebook
+- `src/nlp/augment_dataset_v3.py` — 42.5k row dataset generator
+- `src/nlp/my_finetuned_distilbert_v3/` — trained model checkpoint
 
 ---
 
@@ -667,10 +631,12 @@ WHERE id IN (
 );
 ```
 
-### Retraining the NLP model
+### Switching Bedrock models
 
-1. Edit/run `src/nlp/augment_dataset_v3.py` to regenerate `eda_dataset_v3.csv`.
-2. Upload `model_v3.ipynb` + CSV to Google Colab (GPU runtime).
-3. Run all cells. Download the exported `my_finetuned_distilbert_v3/` folder.
-4. Replace `src/nlp/my_finetuned_distilbert_v3/` with the new checkpoint.
-5. Restart the API server — the model loads automatically.
+Change `BEDROCK_MODEL_ID` in `.env` and restart. Available vision models include:
+- `apac.amazon.nova-lite-v1:0` (current default, Amazon's own)
+- `apac.anthropic.claude-3-haiku-20240307-v1:0` (requires use-case form)
+- `mistral.ministral-3-3b-instruct` (Mistral small)
+- `google.gemma-3-4b-it` (Google Gemma 3)
+
+To disable cloud extraction entirely, set `BEDROCK_ENABLED=false` — the system falls back to local regex extraction.

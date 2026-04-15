@@ -309,90 +309,86 @@ class TelegramService:
         return "unknown"
 
     @staticmethod
-    def _extract_from_text(text: str) -> dict:
-        from api.routes import get_nlp
+    def _get_cloud_extractor():
+        from api.routes import get_cloud
+        return get_cloud()
 
-        nlp = get_nlp()
+    @staticmethod
+    def _local_text_fallback(text: str) -> dict:
+        from nlp.inference import TransactionExtractor
+        nlp = TransactionExtractor()
         r = nlp.extract(text)
-        return {**r, "transcript": text}
+        return {**r, "transcript": text, "debug_amount_source": "local_fallback"}
+
+    @staticmethod
+    def _extract_from_text(text: str) -> dict:
+        cloud = TelegramService._get_cloud_extractor()
+        if cloud is not None:
+            try:
+                r = cloud.extract_from_text(text)
+                return {**r, "transcript": text, "debug_amount_source": "cloud"}
+            except Exception:
+                logging.getLogger(__name__).warning("Cloud text extraction failed, using local fallback")
+        return TelegramService._local_text_fallback(text)
 
     @staticmethod
     def _extract_from_audio_file(path: str) -> dict:
-        from api.routes import get_nlp, get_stt
-
+        from api.routes import get_stt
         stt = get_stt()
         transcript = stt.process_audio(path)["transcript"]
-        nlp = get_nlp()
-        r = nlp.extract(transcript)
-        return {**r, "transcript": transcript}
+
+        cloud = TelegramService._get_cloud_extractor()
+        if cloud is not None:
+            try:
+                r = cloud.extract_from_text(transcript)
+                return {**r, "transcript": transcript, "debug_amount_source": "cloud"}
+            except Exception:
+                logging.getLogger(__name__).warning("Cloud audio extraction failed, using local fallback")
+        return TelegramService._local_text_fallback(transcript)
 
     @staticmethod
     def _extract_from_image_file(path: str, caption: str = "") -> dict:
-        from api.routes import get_nlp, get_ocr, get_upi_detector
+        cloud = TelegramService._get_cloud_extractor()
+        if cloud is not None:
+            try:
+                with open(path, "rb") as f:
+                    image_bytes = f.read()
+                ext = os.path.splitext(path)[1] or ".jpg"
+                r = cloud.extract_from_image(image_bytes, image_ext=ext, caption=caption or None)
+                return {
+                    "amount": r.get("amount"),
+                    "category": r.get("category", "misc"),
+                    "payment_method": r.get("payment_method"),
+                    "payment_provider": r.get("payment_provider"),
+                    "bank_account": r.get("bank_account"),
+                    "cash_flow": r.get("cash_flow"),
+                    "transcript": r.get("description", "")[:2000],
+                    "receipt_account_last4": None,
+                    "receipt_institution_hint": None,
+                    "debug_amount_source": "cloud",
+                    "debug_model_source": r.get("debug_model_source"),
+                    "debug_model_id": r.get("debug_model_id"),
+                }
+            except Exception:
+                logging.getLogger(__name__).warning("Cloud image extraction failed, using local fallback")
 
-        visual_provider: str | None = None
-        detector = get_upi_detector()
-        if detector is not None:
-            visual_provider = detector.detect(path)
-
-        # Route OCR mode by visual UPI detection:
-        # - UPI screenshot detected -> keep raw mode (faster/cleaner for app screenshots)
-        # - No UPI detection -> run preprocessing for invoice/bill totals
-        use_preprocessing = not bool(visual_provider)
-        ocr = get_ocr()
-        ocr_result = ocr.process_receipt(path, use_preprocessing=use_preprocessing)
+        # Fallback: legacy OCR + NLP (when Bedrock is disabled or fails)
+        from ocr.extractor import ReceiptOCR
+        from nlp.inference import TransactionExtractor
+        ocr = ReceiptOCR()
+        ocr_result = ocr.process_receipt(path, use_preprocessing=True)
         lines = ocr_result.get("all_lines", [])
         combined = " ".join(lines)
         cap = (caption or "").strip()
         blob = f"{cap}\n{combined}".strip() if cap else combined.strip()
         if not blob:
             blob = cap or "receipt"
-        ocr_parsed = ocr_result.get("parsed", {})
-        nlp = get_nlp()
+        nlp = TransactionExtractor()
         nlp_result = nlp.extract(blob)
-
-        # UPI screenshots are better parsed by NLP amount extraction (currency-tagged values),
-        # while invoice/bill images are better handled by OCR total-line extraction.
-        is_upi_evidence = bool(
-            visual_provider
-            or ocr_parsed.get("payment_provider")
-            or nlp_result.get("payment_provider")
-            or ocr_parsed.get("payment_method") == "upi"
-            or nlp_result.get("payment_method") == "upi"
-        )
-        if is_upi_evidence:
-            final_amount = nlp_result.get("amount") or ocr_parsed.get("amount")
-        else:
-            final_amount = ocr_parsed.get("amount") or nlp_result.get("amount")
-        final_payment = ocr_parsed.get("payment_method")
-        if final_payment == "unknown":
-            final_payment = nlp_result.get("payment_method")
-
-        final_provider = (
-            visual_provider
-            or ocr_parsed.get("payment_provider")
-            or nlp_result.get("payment_provider")
-        )
-        if final_provider and (final_payment is None or final_payment == "unknown"):
-            final_payment = "upi"
-        if is_upi_evidence and (final_payment is None or final_payment == "unknown"):
-            final_payment = "upi"
-
-        final_cash_flow = ocr_parsed.get("cash_flow") or nlp_result.get("cash_flow")
-
         return {
-            "amount": final_amount,
-            "category": nlp_result.get("category", "misc"),
-            "payment_method": final_payment,
-            "payment_provider": final_provider,
-            "bank_account": nlp_result.get("bank_account"),
-            "cash_flow": final_cash_flow,
+            **nlp_result,
             "transcript": blob[:2000],
-            "receipt_account_last4": ocr_parsed.get("instrument_last4"),
-            "receipt_institution_hint": ocr_parsed.get("instrument_institution_hint"),
-            "debug_is_upi_evidence": is_upi_evidence,
-            "debug_amount_source": "nlp" if is_upi_evidence else "ocr",
-            "debug_ocr_preprocessing": use_preprocessing,
+            "debug_amount_source": "local_fallback",
         }
 
     async def _download_telegram_file(self, file_id: str) -> tuple[bytes, str]:
@@ -628,9 +624,9 @@ class TelegramService:
         debug_lines = [
             "Debug:",
             f"- amount_source: {extracted.get('debug_amount_source') or 'unknown'}",
-            f"- upi_evidence: {bool(extracted.get('debug_is_upi_evidence'))}",
+            f"- model: {extracted.get('debug_model_source') or 'local'}",
             f"- payment_provider: {payment_provider or 'none'}",
-            f"- bank_last4: {extracted.get('receipt_account_last4') or 'none'}",
+            f"- bank_hint: {bank_hint or 'none'}",
             f"- raw_text: {dbg_raw or 'none'}",
         ]
         lines.extend(debug_lines)
@@ -1482,7 +1478,7 @@ class TelegramService:
                 funding_code = payload.get("funding_account_code")
                 funding_type = payload.get("funding_account_type")
                 session_payment_provider = payload.get("payment_provider")
-                extract = self._extract_from_text(f"{parts[1]} {description}".strip())
+                extract = self._extract_from_text(f"{parts[1]} {description}")
                 ex_pm = extract.get("payment_method")
                 ex_cat = extract.get("category")
                 ex_prov = extract.get("payment_provider")

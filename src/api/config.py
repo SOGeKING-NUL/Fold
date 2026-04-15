@@ -30,6 +30,11 @@ class Settings:
     roboflow_api_key: str
     roboflow_upi_model_id: str
     max_transaction_inr: float = 10_000_000.0  # ₹1 crore
+    # AWS Bedrock cloud extraction
+    bedrock_enabled: bool = False
+    bedrock_region: str = "ap-south-1"
+    bedrock_model_id: str = "apac.amazon.nova-lite-v1:0"
+    bedrock_timeout_seconds: int = 30
 
 
 def get_settings() -> Settings:
@@ -43,6 +48,12 @@ def get_settings() -> Settings:
         "ROBOFLOW_UPI_MODEL_ID", "document-classification/upi/1"
     )
     max_transaction_inr = float(os.getenv("MAX_TRANSACTION_INR", "1000000"))
+    bedrock_enabled = os.getenv("BEDROCK_ENABLED", "").lower() in ("1", "true", "yes")
+    bedrock_region = os.getenv("BEDROCK_REGION", "ap-south-1")
+    bedrock_model_id = os.getenv(
+        "BEDROCK_MODEL_ID", "anthropic.claude-3-haiku-20240307-v1:0"
+    )
+    bedrock_timeout = int(os.getenv("BEDROCK_TIMEOUT_SECONDS", "30"))
 
     missing = []
     if not database_url:
@@ -60,4 +71,8 @@ def get_settings() -> Settings:
         roboflow_api_key=roboflow_api_key,
         roboflow_upi_model_id=roboflow_upi_model_id,
         max_transaction_inr=max_transaction_inr,
+        bedrock_enabled=bedrock_enabled,
+        bedrock_region=bedrock_region,
+        bedrock_model_id=bedrock_model_id,
+        bedrock_timeout_seconds=bedrock_timeout,
     )

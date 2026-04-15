@@ -1,27 +1,23 @@
 """
 API Routes
 ==========
-Defines the FastAPI endpoint handlers for the three extraction pipelines
-(audio, text, image) plus the category correction endpoint.
+FastAPI endpoint handlers for extraction pipelines (text, audio, image)
+and the category correction endpoint.
 
-Each route receives raw input, passes it through the appropriate AI engine
-(STT / OCR / direct), and then funnels the result through the unified
-NLP TransactionExtractor to produce a normalized JSON response.
+Primary path: AWS Bedrock vision-language model for structured extraction.
+Fallback: local regex-based extraction when Bedrock is disabled or fails.
 """
 
 import os
 import sys
 import tempfile
+import logging
+
 from fastapi import APIRouter, UploadFile, File, HTTPException
 
-# ─── Fix imports: add `src/` to the Python path ─────────────────────────
-# This allows us to import sibling packages (ocr, stt, nlp) cleanly
-# regardless of how the server is launched.
 SRC_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if SRC_DIR not in sys.path:
     sys.path.insert(0, SRC_DIR)
-
-import logging
 
 from api.schemas import (
     TextRequest,
@@ -31,30 +27,38 @@ from api.schemas import (
     ErrorResponse,
 )
 from api.config import get_settings
-from nlp.inference import TransactionExtractor
+from nlp.cloud_extractor import CloudExtractor
 from stt.transcriber import VoiceTranscriber
-from ocr.extractor import ReceiptOCR
-from ocr.upi_detector import UPIAppDetector
 
 _logger = logging.getLogger(__name__)
 
-# ─── Router ──────────────────────────────────────────────────────────────
 router = APIRouter(prefix="/api/v1")
 
-# ─── Lazy-loaded AI engines (initialized once on first request) ──────────
-_nlp: TransactionExtractor | None = None
+# ─── Lazy-loaded engines (initialized once on first request) ──────────
+_cloud: CloudExtractor | None = None
+_cloud_checked = False
 _stt: VoiceTranscriber | None = None
-_ocr: ReceiptOCR | None = None
-_upi_detector: UPIAppDetector | None = None
-_upi_detector_checked = False
 
 
-def get_nlp() -> TransactionExtractor:
-    """Singleton loader for the NLP extraction engine."""
-    global _nlp
-    if _nlp is None:
-        _nlp = TransactionExtractor()
-    return _nlp
+def get_cloud() -> CloudExtractor | None:
+    """Singleton loader for the Bedrock cloud extractor (optional)."""
+    global _cloud, _cloud_checked
+    if not _cloud_checked:
+        _cloud_checked = True
+        try:
+            settings = get_settings()
+            if settings.bedrock_enabled:
+                _cloud = CloudExtractor(
+                    region=settings.bedrock_region,
+                    model_id=settings.bedrock_model_id,
+                    timeout_seconds=settings.bedrock_timeout_seconds,
+                )
+                _logger.info("Cloud extractor enabled (model=%s)", settings.bedrock_model_id)
+            else:
+                _logger.info("BEDROCK_ENABLED not set — cloud extraction disabled")
+        except Exception:
+            _logger.exception("Failed to init cloud extractor")
+    return _cloud
 
 
 def get_stt() -> VoiceTranscriber:
@@ -65,57 +69,28 @@ def get_stt() -> VoiceTranscriber:
     return _stt
 
 
-def get_ocr() -> ReceiptOCR:
-    """Singleton loader for the PaddleOCR engine."""
-    global _ocr
-    if _ocr is None:
-        _ocr = ReceiptOCR()
-    return _ocr
-
-
-def get_upi_detector() -> UPIAppDetector | None:
-    """Singleton loader for the Roboflow UPI logo detector (optional)."""
-    global _upi_detector, _upi_detector_checked
-    if not _upi_detector_checked:
-        _upi_detector_checked = True
-        try:
-            settings = get_settings()
-            if settings.roboflow_api_key:
-                _upi_detector = UPIAppDetector(
-                    api_key=settings.roboflow_api_key,
-                    model_id=settings.roboflow_upi_model_id,
-                )
-                _logger.info("UPI logo detector enabled (model=%s)", settings.roboflow_upi_model_id)
-            else:
-                _logger.info("ROBOFLOW_API_KEY not set — UPI logo detection disabled")
-        except Exception:
-            _logger.exception("Failed to init UPI detector — logo detection disabled")
-    return _upi_detector
-
-
 # ═══════════════════════════════════════════════════════════════════════
 # 1. TEXT PIPELINE
 # ═══════════════════════════════════════════════════════════════════════
 
 @router.post("/extract/text", response_model=TransactionResponse)
 async def extract_from_text(request: TextRequest):
-    """
-    Extract structured transaction data from a raw text message.
-    This is the simplest pipeline — bypasses STT and OCR entirely.
-
-    Used when a WhatsApp user sends a plain text message like:
-        "Swiggy se 450 rupaye ka pizza mangwaya UPI se"
-    """
+    """Extract structured transaction data from a raw text message."""
     try:
-        nlp = get_nlp()
-        result = nlp.extract(request.text)
+        cloud = get_cloud()
+        if cloud is not None:
+            result = cloud.extract_from_text(request.text)
+            return TransactionResponse(
+                source="text",
+                data=TransactionData(text_transcript=request.text, **result),
+            )
 
+        from nlp.inference import TransactionExtractor
+        nlp = TransactionExtractor()
+        result = nlp.extract(request.text)
         return TransactionResponse(
             source="text",
-            data=TransactionData(
-                text_transcript=request.text,
-                **result
-            )
+            data=TransactionData(text_transcript=request.text, **result),
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -127,63 +102,48 @@ async def extract_from_text(request: TextRequest):
 
 @router.post("/extract/audio", response_model=TransactionResponse)
 async def extract_from_audio(file: UploadFile = File(...)):
-    """
-    Extract structured transaction data from a voice note.
-
-    Flow: .ogg file → Whisper STT → raw transcript → NLP extraction.
-
-    Accepts any audio format supported by FFmpeg (.ogg, .wav, .mp3, .m4a).
-    """
+    """Extract structured transaction data from a voice note (Whisper STT -> cloud/NLP)."""
+    tmp_path = None
     try:
-        # Save uploaded audio to a temporary file
         suffix = os.path.splitext(file.filename or ".ogg")[1]
         with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
             content = await file.read()
             tmp.write(content)
             tmp_path = tmp.name
 
-        # Step 1: Transcribe audio → text
         stt = get_stt()
-        stt_result = stt.process_audio(tmp_path)
-        transcript = stt_result["transcript"]
+        transcript = stt.process_audio(tmp_path)["transcript"]
 
-        # Step 2: Extract structured data from transcript
-        nlp = get_nlp()
-        result = nlp.extract(transcript)
-
-        # Cleanup temp file
-        os.unlink(tmp_path)
+        cloud = get_cloud()
+        if cloud is not None:
+            result = cloud.extract_from_text(transcript)
+        else:
+            from nlp.inference import TransactionExtractor
+            nlp = TransactionExtractor()
+            result = nlp.extract(transcript)
 
         return TransactionResponse(
             source="audio",
-            data=TransactionData(
-                text_transcript=transcript,
-                **result
-            )
+            data=TransactionData(text_transcript=transcript, **result),
         )
     except Exception as e:
-        # Cleanup on error
-        if 'tmp_path' in locals() and os.path.exists(tmp_path):
-            os.unlink(tmp_path)
         raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        if tmp_path and os.path.exists(tmp_path):
+            os.unlink(tmp_path)
 
 
 # ═══════════════════════════════════════════════════════════════════════
-# 3. IMAGE (OCR) PIPELINE
+# 3. IMAGE PIPELINE
 # ═══════════════════════════════════════════════════════════════════════
 
 @router.post("/extract/image", response_model=TransactionResponse)
 async def extract_from_image(file: UploadFile = File(...)):
     """
-    Extract structured transaction data from a receipt image.
-
-    Flow:
-      1) Roboflow logo model first (UPI detection),
-      2) OCR mode decision:
-         - UPI detected -> raw OCR
-         - no UPI detected -> preprocessed OCR
-      3) OCR transcript to NLP.
+    Extract structured transaction data from a receipt/screenshot image.
+    Sends the image directly to the cloud VLM for end-to-end extraction.
     """
+    tmp_path = None
     try:
         suffix = os.path.splitext(file.filename or ".jpg")[1]
         with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
@@ -191,106 +151,34 @@ async def extract_from_image(file: UploadFile = File(...)):
             tmp.write(content)
             tmp_path = tmp.name
 
-        # Step 1: Visual UPI logo detection first (model-driven routing)
-        visual_provider: str | None = None
-        detector = get_upi_detector()
-        if detector is not None:
-            visual_provider = detector.detect(tmp_path)
+        cloud = get_cloud()
+        if cloud is not None:
+            result = cloud.extract_from_image(content, image_ext=suffix)
+            return TransactionResponse(
+                source="image",
+                data=TransactionData(
+                    text_transcript=result.get("description") or "",
+                    **{k: v for k, v in result.items() if k != "description"},
+                ),
+            )
 
-        # Step 2: Run PaddleOCR in routed mode
-        use_preprocessing = not bool(visual_provider)
-        ocr = get_ocr()
-        ocr_result = ocr.process_receipt(tmp_path, use_preprocessing=use_preprocessing)
-
+        # Fallback: legacy OCR + NLP path (only if Bedrock disabled)
+        from ocr.extractor import ReceiptOCR
+        from nlp.inference import TransactionExtractor
+        ocr = ReceiptOCR()
+        ocr_result = ocr.process_receipt(tmp_path, use_preprocessing=True)
         all_text = " ".join(ocr_result.get("all_lines", []))
-        ocr_parsed = ocr_result.get("parsed", {})
-
-        # Step 3: NLP on OCR text
-        nlp = get_nlp()
+        nlp = TransactionExtractor()
         nlp_result = nlp.extract(all_text)
-
-        # Merge:
-        # - UPI screenshots: NLP amount works better (currency-tagged / app-style text)
-        # - Invoice/bill images: OCR total-line extraction works better
-        is_upi_evidence = bool(
-            visual_provider
-            or ocr_parsed.get("payment_provider")
-            or nlp_result.get("payment_provider")
-            or ocr_parsed.get("payment_method") == "upi"
-            or nlp_result.get("payment_method") == "upi"
-        )
-        if is_upi_evidence:
-            final_amount = nlp_result.get("amount") or ocr_parsed.get("amount")
-        else:
-            final_amount = ocr_parsed.get("amount") or nlp_result.get("amount")
-        final_payment = ocr_parsed.get("payment_method")
-        if final_payment == "unknown":
-            final_payment = nlp_result.get("payment_method")
-
-        final_provider = (
-            visual_provider
-            or ocr_parsed.get("payment_provider")
-            or nlp_result.get("payment_provider")
-        )
-        if final_provider and (final_payment is None or final_payment == "unknown"):
-            final_payment = "upi"
-        if is_upi_evidence and (final_payment is None or final_payment == "unknown"):
-            final_payment = "upi"
-
-        final_cash_flow = ocr_parsed.get("cash_flow") or nlp_result.get("cash_flow")
-
-        os.unlink(tmp_path)
-
         return TransactionResponse(
             source="image",
-            data=TransactionData(
-                text_transcript=all_text,
-                amount=final_amount,
-                category=nlp_result["category"],
-                payment_method=final_payment,
-                payment_provider=final_provider,
-                bank_account=nlp_result.get("bank_account"),
-                cash_flow=final_cash_flow,
-                receipt_account_last4=ocr_parsed.get("instrument_last4"),
-                receipt_institution_hint=ocr_parsed.get("instrument_institution_hint"),
-                debug_is_upi_evidence=is_upi_evidence,
-                debug_amount_source="nlp" if is_upi_evidence else "ocr",
-                debug_ocr_preprocessing=use_preprocessing,
-            )
+            data=TransactionData(text_transcript=all_text, **nlp_result),
         )
     except Exception as e:
-        if 'tmp_path' in locals() and os.path.exists(tmp_path):
-            os.unlink(tmp_path)
         raise HTTPException(status_code=500, detail=str(e))
-
-
-@router.post("/debug/upi-logo")
-async def debug_upi_logo(file: UploadFile = File(...)):
-    """
-    Debug endpoint to test Roboflow UPI-logo model directly.
-    Returns raw detection payload + resolved provider.
-    """
-    try:
-        suffix = os.path.splitext(file.filename or ".jpg")[1]
-        with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
-            content = await file.read()
-            tmp.write(content)
-            tmp_path = tmp.name
-
-        detector = get_upi_detector()
-        if detector is None:
-            raise HTTPException(status_code=400, detail="UPI detector disabled: ROBOFLOW_API_KEY missing")
-        dbg = detector.detect_with_debug(tmp_path)
-        os.unlink(tmp_path)
-        return {"status": "success", **dbg}
-    except HTTPException:
-        if 'tmp_path' in locals() and os.path.exists(tmp_path):
+    finally:
+        if tmp_path and os.path.exists(tmp_path):
             os.unlink(tmp_path)
-        raise
-    except Exception as e:
-        if 'tmp_path' in locals() and os.path.exists(tmp_path):
-            os.unlink(tmp_path)
-        raise HTTPException(status_code=500, detail=str(e))
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -299,20 +187,14 @@ async def debug_upi_logo(file: UploadFile = File(...)):
 
 @router.post("/correct")
 async def correct_category(request: CorrectionRequest):
-    """
-    Save a user's category correction to the override map.
-    Future transactions containing this keyword will automatically
-    use the corrected category instead of the model's prediction.
-
-    Example request:
-        {"keyword": "xyz society", "correct_category": "rent"}
-    """
+    """Save a user's category correction to the override map."""
     try:
-        nlp = get_nlp()
+        from nlp.inference import TransactionExtractor
+        nlp = TransactionExtractor()
         nlp.save_correction(request.keyword, request.correct_category)
         return {
             "status": "success",
-            "message": f"Saved: '{request.keyword}' → '{request.correct_category}'"
+            "message": f"Saved: '{request.keyword}' → '{request.correct_category}'",
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
