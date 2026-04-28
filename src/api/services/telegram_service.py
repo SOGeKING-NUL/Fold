@@ -328,17 +328,17 @@ class TelegramService:
 
     @staticmethod
     def _extract_from_image_file(path: str, caption: str = "") -> dict:
-        from api.routes import get_nlp, get_ocr, get_upi_detector
+        from api.routes import get_nlp, get_ocr, get_upi_detector, get_ollama_structurer
 
         visual_provider: str | None = None
         detector = get_upi_detector()
         if detector is not None:
             visual_provider = detector.detect(path)
 
-        # Route OCR mode by visual UPI detection:
-        # - UPI screenshot detected -> keep raw mode (faster/cleaner for app screenshots)
-        # - No UPI detection -> run preprocessing for invoice/bill totals
-        use_preprocessing = not bool(visual_provider)
+        # Route OCR mode:
+        # Preprocessing intentionally disabled in OCR->LLM->NLP flow.
+        # use_preprocessing = not bool(visual_provider)
+        use_preprocessing = False
         ocr = get_ocr()
         ocr_result = ocr.process_receipt(path, use_preprocessing=use_preprocessing)
         lines = ocr_result.get("all_lines", [])
@@ -348,51 +348,122 @@ class TelegramService:
         if not blob:
             blob = cap or "receipt"
         ocr_parsed = ocr_result.get("parsed", {})
-        nlp = get_nlp()
-        nlp_result = nlp.extract(blob)
 
-        # UPI screenshots are better parsed by NLP amount extraction (currency-tagged values),
-        # while invoice/bill images are better handled by OCR total-line extraction.
+        text_source = "upi_ocr" if visual_provider else "receipt_ocr"
+        llm_result: dict = {}
+        ollama = get_ollama_structurer()
+        if ollama is not None:
+            try:
+                llm_result = ollama.structure_from_ocr(
+                    raw_text=blob,
+                    text_source=text_source,
+                    hints={
+                        "visual_provider": visual_provider,
+                        "ocr_amount": ocr_parsed.get("amount"),
+                        "ocr_payment_method": ocr_parsed.get("payment_method"),
+                        "ocr_payment_provider": ocr_parsed.get("payment_provider"),
+                        "instrument_last4": ocr_parsed.get("instrument_last4"),
+                        "instrument_institution_hint": ocr_parsed.get("instrument_institution_hint"),
+                    },
+                )
+                logging.getLogger(__name__).info(
+                    "[TGImage] ollama structured amount=%s method=%s provider=%s bank=%s cash_flow=%s",
+                    llm_result.get("amount"),
+                    llm_result.get("payment_method"),
+                    llm_result.get("payment_provider"),
+                    llm_result.get("bank_account"),
+                    llm_result.get("cash_flow"),
+                )
+            except Exception:
+                logging.getLogger(__name__).exception(
+                    "Ollama structuring failed; using OCR/NLP fallback"
+                )
+
+        preprocessed_text = blob
+        if llm_result:
+            llm_lines = []
+            if llm_result.get("description"):
+                llm_lines.append(str(llm_result["description"]))
+            if llm_result.get("amount") is not None:
+                llm_lines.append(f"amount rs {llm_result['amount']}")
+            if llm_result.get("payment_method"):
+                llm_lines.append(f"payment method {llm_result['payment_method']}")
+            if llm_result.get("payment_provider"):
+                llm_lines.append(f"provider {llm_result['payment_provider']}")
+            if llm_result.get("bank_account"):
+                llm_lines.append(f"bank {llm_result['bank_account']}")
+            if llm_result.get("cash_flow"):
+                llm_lines.append(f"cash flow {llm_result['cash_flow']}")
+            llm_hint_text = " ; ".join(llm_lines).strip()
+            if llm_hint_text:
+                preprocessed_text = f"{llm_hint_text}\n{blob}".strip()
+
+        nlp = get_nlp()
+        nlp_result = nlp.extract(preprocessed_text or "expense")
+
         is_upi_evidence = bool(
             visual_provider
+            or llm_result.get("payment_provider")
             or ocr_parsed.get("payment_provider")
             or nlp_result.get("payment_provider")
             or ocr_parsed.get("payment_method") == "upi"
             or nlp_result.get("payment_method") == "upi"
         )
-        if is_upi_evidence:
-            final_amount = nlp_result.get("amount") or ocr_parsed.get("amount")
-        else:
-            final_amount = ocr_parsed.get("amount") or nlp_result.get("amount")
-        final_payment = ocr_parsed.get("payment_method")
+        # LLM is primary for OCR-derived extraction. NLP is mainly for category.
+        final_amount = llm_result.get("amount") or ocr_parsed.get("amount") or nlp_result.get("amount")
+        final_payment = llm_result.get("payment_method") or ocr_parsed.get("payment_method") or nlp_result.get("payment_method")
         if final_payment == "unknown":
-            final_payment = nlp_result.get("payment_method")
+            final_payment = llm_result.get("payment_method") or nlp_result.get("payment_method")
 
         final_provider = (
             visual_provider
+            or llm_result.get("payment_provider")
             or ocr_parsed.get("payment_provider")
             or nlp_result.get("payment_provider")
         )
+        final_cash_flow = llm_result.get("cash_flow") or ocr_parsed.get("cash_flow") or nlp_result.get("cash_flow")
+        final_bank = llm_result.get("bank_account") or nlp_result.get("bank_account")
+
+        amount_source = "none"
+        if llm_result.get("amount") is not None:
+            amount_source = "llm"
+        elif ocr_parsed.get("amount") is not None:
+            amount_source = "ocr"
+        elif nlp_result.get("amount") is not None:
+            amount_source = "nlp"
+
+        logging.getLogger(__name__).info(
+            "[TGImage] merged amount=%s method=%s provider=%s bank=%s cash_flow=%s amount_source=%s llm_called=%s llm_success=%s",
+            final_amount,
+            final_payment,
+            final_provider,
+            final_bank,
+            final_cash_flow,
+            amount_source,
+            ollama is not None,
+            bool(llm_result),
+        )
+
         if final_provider and (final_payment is None or final_payment == "unknown"):
             final_payment = "upi"
         if is_upi_evidence and (final_payment is None or final_payment == "unknown"):
             final_payment = "upi"
-
-        final_cash_flow = ocr_parsed.get("cash_flow") or nlp_result.get("cash_flow")
 
         return {
             "amount": final_amount,
             "category": nlp_result.get("category", "misc"),
             "payment_method": final_payment,
             "payment_provider": final_provider,
-            "bank_account": nlp_result.get("bank_account"),
+            "bank_account": final_bank,
             "cash_flow": final_cash_flow,
-            "transcript": blob[:2000],
+            "transcript": preprocessed_text[:2000],
             "receipt_account_last4": ocr_parsed.get("instrument_last4"),
             "receipt_institution_hint": ocr_parsed.get("instrument_institution_hint"),
             "debug_is_upi_evidence": is_upi_evidence,
-            "debug_amount_source": "nlp" if is_upi_evidence else "ocr",
+            "debug_amount_source": amount_source,
             "debug_ocr_preprocessing": use_preprocessing,
+            "debug_llm_called": bool(ollama is not None),
+            "debug_llm_success": bool(llm_result),
         }
 
     async def _download_telegram_file(self, file_id: str) -> tuple[bytes, str]:
@@ -631,6 +702,8 @@ class TelegramService:
             f"- upi_evidence: {bool(extracted.get('debug_is_upi_evidence'))}",
             f"- payment_provider: {payment_provider or 'none'}",
             f"- bank_last4: {extracted.get('receipt_account_last4') or 'none'}",
+            f"- llm_called: {bool(extracted.get('debug_llm_called'))}",
+            f"- llm_success: {bool(extracted.get('debug_llm_success'))}",
             f"- raw_text: {dbg_raw or 'none'}",
         ]
         lines.extend(debug_lines)

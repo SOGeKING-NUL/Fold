@@ -91,6 +91,41 @@ def is_likely_bank_last4_in_line(line: str, val: float) -> bool:
     return False
 
 
+def is_likely_identifier_number_in_line(line: str, val: float) -> bool:
+    """
+    True when val appears inside an identifier-like mixed token (e.g. UPI handle/email/user id),
+    such as "utsavjana1234@okhdfcbank", where digits are not payment amounts.
+    """
+    if val is None or val <= 0:
+        return False
+    if val != int(val):
+        return False
+
+    digits = str(int(val))
+    if len(digits) < 2:
+        return False
+
+    tokens = re.findall(r"[A-Za-z0-9@._-]+", line)
+    for tok in tokens:
+        if digits not in tok:
+            continue
+        lower_tok = tok.lower()
+        has_alpha = any(ch.isalpha() for ch in tok)
+        has_digit = any(ch.isdigit() for ch in tok)
+        if not (has_alpha and has_digit):
+            continue
+
+        # Allow compact currency forms such as R240 / rs240 / inr240
+        if re.fullmatch(r"(?i)(?:r|rs|inr)\d+(?:\.\d+)?", tok):
+            continue
+
+        # Typical handle / id style token
+        if "@" in tok or "." in tok or "_" in tok or "-" in tok or len(tok) >= 8:
+            return True
+
+    return False
+
+
 # Lines like "HDFC Bank 1751" on GPay / PhonePe — last4 is the *instrument*, not the rupee amount.
 _RE_INSTRUMENT_NAMED = re.compile(
     r"(?i)\b(?P<bank>hdfc|icici|axis|sbi|kotak|idfc|indusind|canara|federal|rbl|bob|pnb|bandhan)"

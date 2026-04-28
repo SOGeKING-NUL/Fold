@@ -32,6 +32,7 @@ from api.schemas import (
 )
 from api.config import get_settings
 from nlp.inference import TransactionExtractor
+from nlp.ollama_structurer import OllamaStructurer
 from stt.transcriber import VoiceTranscriber
 from ocr.extractor import ReceiptOCR
 from ocr.upi_detector import UPIAppDetector
@@ -47,6 +48,8 @@ _stt: VoiceTranscriber | None = None
 _ocr: ReceiptOCR | None = None
 _upi_detector: UPIAppDetector | None = None
 _upi_detector_checked = False
+_ollama_structurer: OllamaStructurer | None = None
+_ollama_structurer_checked = False
 
 
 def get_nlp() -> TransactionExtractor:
@@ -91,6 +94,31 @@ def get_upi_detector() -> UPIAppDetector | None:
         except Exception:
             _logger.exception("Failed to init UPI detector — logo detection disabled")
     return _upi_detector
+
+
+def get_ollama_structurer() -> OllamaStructurer | None:
+    """Singleton loader for local Ollama OCR text structurer (optional)."""
+    global _ollama_structurer, _ollama_structurer_checked
+    if not _ollama_structurer_checked:
+        _ollama_structurer_checked = True
+        try:
+            settings = get_settings()
+            if settings.ollama_enabled:
+                _ollama_structurer = OllamaStructurer(
+                    base_url=settings.ollama_base_url,
+                    model=settings.ollama_model,
+                    timeout_seconds=settings.ollama_timeout_seconds,
+                )
+                _logger.info(
+                    "Ollama structurer enabled (base=%s model=%s)",
+                    settings.ollama_base_url,
+                    settings.ollama_model,
+                )
+            else:
+                _logger.info("OLLAMA_ENABLED=false — Ollama structurer disabled")
+        except Exception:
+            _logger.exception("Failed to init Ollama structurer — disabled")
+    return _ollama_structurer
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -197,64 +225,136 @@ async def extract_from_image(file: UploadFile = File(...)):
         if detector is not None:
             visual_provider = detector.detect(tmp_path)
 
-        # Step 2: Run PaddleOCR in routed mode
-        use_preprocessing = not bool(visual_provider)
+        # Step 2: Run PaddleOCR. Preprocessing intentionally disabled in
+        # OCR->LLM->NLP flow for both UPI and normal receipts.
+        # use_preprocessing = not bool(visual_provider)
+        use_preprocessing = False
         ocr = get_ocr()
         ocr_result = ocr.process_receipt(tmp_path, use_preprocessing=use_preprocessing)
 
         all_text = " ".join(ocr_result.get("all_lines", []))
         ocr_parsed = ocr_result.get("parsed", {})
 
-        # Step 3: NLP on OCR text
+        # Step 3: Ollama structures OCR text (if enabled)
+        text_source = "upi_ocr" if visual_provider else "receipt_ocr"
+        ollama = get_ollama_structurer()
+        llm_result: dict = {}
+        if ollama is not None:
+            try:
+                llm_result = ollama.structure_from_ocr(
+                    raw_text=all_text,
+                    text_source=text_source,
+                    hints={
+                        "visual_provider": visual_provider,
+                        "ocr_amount": ocr_parsed.get("amount"),
+                        "ocr_payment_method": ocr_parsed.get("payment_method"),
+                        "ocr_payment_provider": ocr_parsed.get("payment_provider"),
+                        "instrument_last4": ocr_parsed.get("instrument_last4"),
+                        "instrument_institution_hint": ocr_parsed.get("instrument_institution_hint"),
+                    },
+                )
+                _logger.info(
+                    "[ExtractImage] ollama structured amount=%s method=%s provider=%s bank=%s cash_flow=%s",
+                    llm_result.get("amount"),
+                    llm_result.get("payment_method"),
+                    llm_result.get("payment_provider"),
+                    llm_result.get("bank_account"),
+                    llm_result.get("cash_flow"),
+                )
+            except Exception:
+                _logger.exception("Ollama structuring failed; continuing with OCR/NLP fallback")
+
+        # Step 4: NLP on LLM-preprocessed OCR text (NLP remains final extractor/category)
+        preprocessed_text = all_text
+        if llm_result:
+            llm_lines = []
+            if llm_result.get("description"):
+                llm_lines.append(str(llm_result["description"]))
+            if llm_result.get("amount") is not None:
+                llm_lines.append(f"amount rs {llm_result['amount']}")
+            if llm_result.get("payment_method"):
+                llm_lines.append(f"payment method {llm_result['payment_method']}")
+            if llm_result.get("payment_provider"):
+                llm_lines.append(f"provider {llm_result['payment_provider']}")
+            if llm_result.get("bank_account"):
+                llm_lines.append(f"bank {llm_result['bank_account']}")
+            if llm_result.get("cash_flow"):
+                llm_lines.append(f"cash flow {llm_result['cash_flow']}")
+            llm_hint_text = " ; ".join(llm_lines).strip()
+            if llm_hint_text:
+                preprocessed_text = f"{llm_hint_text}\n{all_text}".strip()
+
         nlp = get_nlp()
-        nlp_result = nlp.extract(all_text)
+        nlp_result = nlp.extract(preprocessed_text or "expense")
 
         # Merge:
         # - UPI screenshots: NLP amount works better (currency-tagged / app-style text)
         # - Invoice/bill images: OCR total-line extraction works better
         is_upi_evidence = bool(
             visual_provider
+            or llm_result.get("payment_provider")
             or ocr_parsed.get("payment_provider")
             or nlp_result.get("payment_provider")
             or ocr_parsed.get("payment_method") == "upi"
             or nlp_result.get("payment_method") == "upi"
         )
-        if is_upi_evidence:
-            final_amount = nlp_result.get("amount") or ocr_parsed.get("amount")
-        else:
-            final_amount = ocr_parsed.get("amount") or nlp_result.get("amount")
-        final_payment = ocr_parsed.get("payment_method")
+        # LLM is primary for OCR-derived extraction. NLP is mainly for category.
+        final_amount = llm_result.get("amount") or ocr_parsed.get("amount") or nlp_result.get("amount")
+        final_payment = llm_result.get("payment_method") or ocr_parsed.get("payment_method") or nlp_result.get("payment_method")
         if final_payment == "unknown":
-            final_payment = nlp_result.get("payment_method")
+            final_payment = llm_result.get("payment_method") or nlp_result.get("payment_method")
 
         final_provider = (
             visual_provider
+            or llm_result.get("payment_provider")
             or ocr_parsed.get("payment_provider")
             or nlp_result.get("payment_provider")
         )
+        final_bank = llm_result.get("bank_account") or nlp_result.get("bank_account")
+        final_cash_flow = llm_result.get("cash_flow") or ocr_parsed.get("cash_flow") or nlp_result.get("cash_flow")
+
+        # debug: where final amount was chosen from
+        amount_source = "none"
+        if llm_result.get("amount") is not None:
+            amount_source = "llm"
+        elif ocr_parsed.get("amount") is not None:
+            amount_source = "ocr"
+        elif nlp_result.get("amount") is not None:
+            amount_source = "nlp"
+
         if final_provider and (final_payment is None or final_payment == "unknown"):
             final_payment = "upi"
         if is_upi_evidence and (final_payment is None or final_payment == "unknown"):
             final_payment = "upi"
 
-        final_cash_flow = ocr_parsed.get("cash_flow") or nlp_result.get("cash_flow")
+        _logger.info(
+            "[ExtractImage] merged amount=%s method=%s provider=%s bank=%s cash_flow=%s amount_source=%s llm_called=%s llm_success=%s",
+            final_amount,
+            final_payment,
+            final_provider,
+            final_bank,
+            final_cash_flow,
+            amount_source,
+            ollama is not None,
+            bool(llm_result),
+        )
 
         os.unlink(tmp_path)
 
         return TransactionResponse(
             source="image",
             data=TransactionData(
-                text_transcript=all_text,
+                text_transcript=preprocessed_text,
                 amount=final_amount,
                 category=nlp_result["category"],
                 payment_method=final_payment,
                 payment_provider=final_provider,
-                bank_account=nlp_result.get("bank_account"),
+                bank_account=final_bank,
                 cash_flow=final_cash_flow,
                 receipt_account_last4=ocr_parsed.get("instrument_last4"),
                 receipt_institution_hint=ocr_parsed.get("instrument_institution_hint"),
                 debug_is_upi_evidence=is_upi_evidence,
-                debug_amount_source="nlp" if is_upi_evidence else "ocr",
+                debug_amount_source=amount_source,
                 debug_ocr_preprocessing=use_preprocessing,
             )
         )

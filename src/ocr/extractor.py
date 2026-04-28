@@ -6,6 +6,7 @@ import re
 from ocr.amount_plausibility import (
     _is_year_in_date_context,
     extract_payment_instrument_from_lines,
+    is_likely_identifier_number_in_line,
     is_likely_bank_last4_in_line,
     plausible_inr_amount,
 )
@@ -279,6 +280,8 @@ class ReceiptOCR:
                 if not plausible_inr_amount(val):
                     continue
                 if is_likely_bank_last4_in_line(line, val):
+                    continue
+                if is_likely_identifier_number_in_line(line, val):
                     continue
                 if _is_year_in_date_context(line, val):
                     continue
