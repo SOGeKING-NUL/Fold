@@ -17,7 +17,7 @@ def get_db_connection():
                 yield conn
                 return
         except psycopg.OperationalError as exc:
-            # Network/DNS hiccups can briefly fail webhook requests on Windows.
+            # Network/DNS hiccups can briefly fail API requests on Windows.
             if "getaddrinfo failed" not in str(exc) or attempt == 2:
                 raise
             last_exc = exc
@@ -29,10 +29,8 @@ def get_db_connection():
 
 _RESET_SCHEMA_SQL = """
     DROP TABLE IF EXISTS journal_media CASCADE;
-    DROP TABLE IF EXISTS telegram_expense_pending_media CASCADE;
     DROP TABLE IF EXISTS payment_profiles CASCADE;
     DROP TABLE IF EXISTS ingestion_events CASCADE;
-    DROP TABLE IF EXISTS telegram_sessions CASCADE;
     DROP TABLE IF EXISTS ledger_entries CASCADE;
     DROP TABLE IF EXISTS journal_transactions CASCADE;
     DROP TABLE IF EXISTS accounts CASCADE;
@@ -41,9 +39,17 @@ _RESET_SCHEMA_SQL = """
     CREATE TABLE users (
         id BIGSERIAL PRIMARY KEY,
         external_user_ref TEXT NOT NULL UNIQUE,
+        clerk_user_id TEXT UNIQUE,
+        email TEXT,
+        full_name TEXT,
+        avatar_url TEXT,
         preferences_json JSONB NOT NULL DEFAULT '{}'::jsonb,
-        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
+
+    CREATE INDEX idx_users_clerk_id ON users(clerk_user_id);
+    CREATE INDEX idx_users_email ON users(email);
 
     CREATE TABLE accounts (
         id BIGSERIAL PRIMARY KEY,
@@ -95,14 +101,6 @@ _RESET_SCHEMA_SQL = """
         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
 
-    CREATE TABLE telegram_expense_pending_media (
-        telegram_user_id BIGINT PRIMARY KEY,
-        media_kind TEXT NOT NULL CHECK (media_kind IN ('image', 'audio')),
-        mime_type TEXT,
-        file_bytes BYTEA NOT NULL,
-        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-    );
-
     CREATE TABLE ledger_entries (
         id BIGSERIAL PRIMARY KEY,
         journal_transaction_id BIGINT NOT NULL REFERENCES journal_transactions(id) ON DELETE CASCADE,
@@ -111,14 +109,6 @@ _RESET_SCHEMA_SQL = """
         amount_minor BIGINT NOT NULL CHECK (amount_minor > 0),
         currency TEXT NOT NULL DEFAULT 'INR',
         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-    );
-
-    CREATE TABLE telegram_sessions (
-        id BIGSERIAL PRIMARY KEY,
-        telegram_user_id BIGINT NOT NULL UNIQUE,
-        state TEXT NOT NULL DEFAULT 'idle',
-        payload_json JSONB NOT NULL DEFAULT '{}'::jsonb,
-        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
 
     CREATE TABLE ingestion_events (
@@ -138,9 +128,17 @@ _ENSURE_SCHEMA_SQL = """
     CREATE TABLE IF NOT EXISTS users (
         id BIGSERIAL PRIMARY KEY,
         external_user_ref TEXT NOT NULL UNIQUE,
+        clerk_user_id TEXT UNIQUE,
+        email TEXT,
+        full_name TEXT,
+        avatar_url TEXT,
         preferences_json JSONB NOT NULL DEFAULT '{}'::jsonb,
-        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
+
+    CREATE INDEX IF NOT EXISTS idx_users_clerk_id ON users(clerk_user_id);
+    CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
 
     CREATE TABLE IF NOT EXISTS accounts (
         id BIGSERIAL PRIMARY KEY,
@@ -192,14 +190,6 @@ _ENSURE_SCHEMA_SQL = """
         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
 
-    CREATE TABLE IF NOT EXISTS telegram_expense_pending_media (
-        telegram_user_id BIGINT PRIMARY KEY,
-        media_kind TEXT NOT NULL CHECK (media_kind IN ('image', 'audio')),
-        mime_type TEXT,
-        file_bytes BYTEA NOT NULL,
-        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-    );
-
     CREATE TABLE IF NOT EXISTS ledger_entries (
         id BIGSERIAL PRIMARY KEY,
         journal_transaction_id BIGINT NOT NULL REFERENCES journal_transactions(id) ON DELETE CASCADE,
@@ -208,14 +198,6 @@ _ENSURE_SCHEMA_SQL = """
         amount_minor BIGINT NOT NULL CHECK (amount_minor > 0),
         currency TEXT NOT NULL DEFAULT 'INR',
         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-    );
-
-    CREATE TABLE IF NOT EXISTS telegram_sessions (
-        id BIGSERIAL PRIMARY KEY,
-        telegram_user_id BIGINT NOT NULL UNIQUE,
-        state TEXT NOT NULL DEFAULT 'idle',
-        payload_json JSONB NOT NULL DEFAULT '{}'::jsonb,
-        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
 
     CREATE TABLE IF NOT EXISTS ingestion_events (
@@ -247,8 +229,31 @@ def ensure_schema() -> None:
     with get_db_connection() as conn:
         with conn.cursor() as cur:
             cur.execute(_ENSURE_SCHEMA_SQL)
+            # Add new columns to existing users table if they don't exist
+            cur.execute(
+                "ALTER TABLE users ADD COLUMN IF NOT EXISTS clerk_user_id TEXT UNIQUE"
+            )
+            cur.execute(
+                "ALTER TABLE users ADD COLUMN IF NOT EXISTS email TEXT"
+            )
+            cur.execute(
+                "ALTER TABLE users ADD COLUMN IF NOT EXISTS full_name TEXT"
+            )
+            cur.execute(
+                "ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_url TEXT"
+            )
+            cur.execute(
+                "ALTER TABLE users ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()"
+            )
             cur.execute(
                 "ALTER TABLE users ADD COLUMN IF NOT EXISTS preferences_json JSONB NOT NULL DEFAULT '{}'::jsonb"
+            )
+            # Create indexes if they don't exist
+            cur.execute(
+                "CREATE INDEX IF NOT EXISTS idx_users_clerk_id ON users(clerk_user_id)"
+            )
+            cur.execute(
+                "CREATE INDEX IF NOT EXISTS idx_users_email ON users(email)"
             )
         conn.commit()
 

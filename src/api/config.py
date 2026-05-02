@@ -25,8 +25,6 @@ def _load_env_file() -> None:
 @dataclass(frozen=True)
 class Settings:
     database_url: str
-    telegram_bot_token: str
-    telegram_webhook_secret: str
     roboflow_api_key: str
     roboflow_upi_model_id: str
     ollama_enabled: bool
@@ -40,8 +38,6 @@ def get_settings() -> Settings:
     _load_env_file()
 
     database_url = os.getenv("DATABASE_URL")
-    telegram_bot_token = os.getenv("TELE_BOT_HTTP_API")
-    telegram_webhook_secret = os.getenv("TELEGRAM_WEBHOOK_SECRET", "")
     roboflow_api_key = os.getenv("ROBOFLOW_API_KEY", "")
     roboflow_upi_model_id = os.getenv(
         "ROBOFLOW_UPI_MODEL_ID", "document-classification/upi/1"
@@ -55,16 +51,12 @@ def get_settings() -> Settings:
     missing = []
     if not database_url:
         missing.append("DATABASE_URL")
-    if not telegram_bot_token:
-        missing.append("TELE_BOT_HTTP_API")
     if missing:
         missing_text = ", ".join(missing)
         raise RuntimeError(f"Missing required env variables: {missing_text}")
 
     return Settings(
         database_url=database_url,
-        telegram_bot_token=telegram_bot_token,
-        telegram_webhook_secret=telegram_webhook_secret,
         roboflow_api_key=roboflow_api_key,
         roboflow_upi_model_id=roboflow_upi_model_id,
         ollama_enabled=ollama_enabled,

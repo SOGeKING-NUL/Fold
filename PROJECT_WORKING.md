@@ -19,8 +19,8 @@ The current implementation uses a hybrid stack:
 ### API and Application
 
 - **FastAPI** (`src/api/routes.py`): extraction endpoints (`/extract/text`, `/extract/audio`, `/extract/image`) and correction routes.
-- **Uvicorn**: serves the app and webhook handlers.
-- **Telegram webhook service** (`src/api/services/telegram_service.py`): mirrors extraction flow used by API.
+- **Uvicorn**: serves the app APIs.
+- **Web dashboard service** (`src/api/controllers/web_controller.py`): session-based reporting APIs for the frontend.
 
 ### Input Processing
 
@@ -47,8 +47,6 @@ Core settings are loaded from `.env` through `src/api/config.py`.
 Important variables currently used:
 
 - `DATABASE_URL`
-- `TELE_BOT_HTTP_API`
-- `TELEGRAM_WEBHOOK_SECRET`
 - `ROBOFLOW_API_KEY`
 - `ROBOFLOW_UPI_MODEL_ID`
 - `OLLAMA_ENABLED`
@@ -56,6 +54,7 @@ Important variables currently used:
 - `OLLAMA_MODEL`
 - `OLLAMA_TIMEOUT_SECONDS`
 - `MAX_TRANSACTION_INR`
+- `FOLD_WEB_SIGNING_SECRET`
 
 ---
 

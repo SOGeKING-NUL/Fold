@@ -1,7 +1,7 @@
 """
 Web Dashboard Authentication
 =============================
-Issues time-limited, HMAC-signed magic-link tokens from the Telegram bot.
+Issues time-limited, HMAC-signed magic-link tokens for web login.
 The Next.js frontend exchanges a token for a secure session cookie.
 Tokens are single-use and expire after 5 minutes.
 """
@@ -47,11 +47,11 @@ def _cleanup_expired() -> None:
         del _SESSIONS[k]
 
 
-def issue_magic_token(telegram_user_id: int) -> str:
-    """Create a signed, single-use token the bot sends as a URL parameter."""
+def issue_magic_token(user_ref: str) -> str:
+    """Create a signed, single-use token for URL-based login."""
     _cleanup_expired()
     payload = json.dumps(
-        {"tg": telegram_user_id, "ts": int(time.time()), "nonce": secrets.token_hex(8)},
+        {"sub": user_ref, "ts": int(time.time()), "nonce": secrets.token_hex(8)},
         separators=(",", ":"),
     )
     sig = _sign(payload)
@@ -63,7 +63,7 @@ def issue_magic_token(telegram_user_id: int) -> str:
 def exchange_token(token: str) -> Optional[dict]:
     """
     Validate and consume a magic-link token.
-    Returns {"user_ref": "telegram:<id>", "session_id": "..."} on success, None on failure.
+    Returns {"user_ref": "<principal>", "session_id": "..."} on success, None on failure.
     """
     _cleanup_expired()
     import base64
@@ -91,23 +91,23 @@ def exchange_token(token: str) -> Optional[dict]:
     if now - ts > TOKEN_TTL_SECONDS:
         return None
 
-    token_id = f"{data.get('tg')}:{data.get('nonce')}"
+    token_id = f"{data.get('sub')}:{data.get('nonce')}"
     if token_id in _USED_TOKENS:
         return None
     _USED_TOKENS[token_id] = now
 
-    telegram_user_id = data["tg"]
-    user_ref = f"telegram:{telegram_user_id}"
+    user_ref = str(data.get("sub") or "").strip()
+    if not user_ref:
+        return None
 
     session_id = secrets.token_urlsafe(32)
     _SESSIONS[session_id] = {
         "user_ref": user_ref,
-        "telegram_user_id": telegram_user_id,
         "created_at": now,
         "expires_at": now + SESSION_TTL_SECONDS,
     }
 
-    return {"user_ref": user_ref, "session_id": session_id, "telegram_user_id": telegram_user_id}
+    return {"user_ref": user_ref, "session_id": session_id}
 
 
 def validate_session(session_id: str) -> Optional[dict]:
@@ -127,3 +127,19 @@ def destroy_session(session_id: str) -> bool:
         del _SESSIONS[session_id]
         return True
     return False
+
+
+def create_session(user_ref: str) -> dict:
+    """Create a session directly for trusted first-party login forms."""
+    _cleanup_expired()
+    cleaned = str(user_ref or "").strip()
+    if not cleaned:
+        raise ValueError("user_ref is required")
+    now = time.time()
+    session_id = secrets.token_urlsafe(32)
+    _SESSIONS[session_id] = {
+        "user_ref": cleaned,
+        "created_at": now,
+        "expires_at": now + SESSION_TTL_SECONDS,
+    }
+    return {"user_ref": cleaned, "session_id": session_id}

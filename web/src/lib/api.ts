@@ -20,7 +20,6 @@ async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
 
 export interface AuthMeResponse {
   user_ref: string;
-  telegram_user_id: number;
 }
 
 export interface DashboardSummary {
@@ -82,6 +81,14 @@ export async function exchangeToken(token: string) {
   return apiFetch<{ status: string; user_ref: string }>(
     `/api/v1/web/auth/exchange?token=${encodeURIComponent(token)}`
   );
+}
+
+export async function login(userRef: string) {
+  return apiFetch<{ status: string; user_ref: string }>("/api/v1/web/auth/login", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ user_ref: userRef }),
+  });
 }
 
 export async function getMe() {

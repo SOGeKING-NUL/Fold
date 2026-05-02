@@ -7,8 +7,14 @@ All routes live under /api/v1/web/.
 
 from datetime import datetime
 from fastapi import APIRouter, HTTPException, Query, Request, Response
+from pydantic import BaseModel
 
-from api.services.web_auth_service import exchange_token, validate_session, destroy_session
+from api.services.web_auth_service import (
+    create_session,
+    exchange_token,
+    validate_session,
+    destroy_session,
+)
 from api.services.ledger_service import LedgerService
 
 router = APIRouter(prefix="/api/v1/web", tags=["web-dashboard"])
@@ -16,6 +22,10 @@ ledger_service = LedgerService()
 
 SESSION_COOKIE = "fold_session"
 COOKIE_MAX_AGE = 86400 * 7
+
+
+class LoginRequest(BaseModel):
+    user_ref: str
 
 
 def _require_session(request: Request) -> dict:
@@ -49,10 +59,25 @@ async def auth_exchange(token: str, response: Response):
 async def auth_me(request: Request):
     """Return the current session's user info."""
     session = _require_session(request)
-    return {
-        "user_ref": session["user_ref"],
-        "telegram_user_id": session["telegram_user_id"],
-    }
+    return {"user_ref": session["user_ref"]}
+
+
+@router.post("/auth/login")
+async def auth_login(payload: LoginRequest, response: Response):
+    """Direct web login with a user reference."""
+    try:
+        result = create_session(payload.user_ref)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    response.set_cookie(
+        key=SESSION_COOKIE,
+        value=result["session_id"],
+        httponly=True,
+        samesite="lax",
+        max_age=COOKIE_MAX_AGE,
+        secure=False,
+    )
+    return {"status": "ok", "user_ref": result["user_ref"]}
 
 
 @router.post("/auth/logout")

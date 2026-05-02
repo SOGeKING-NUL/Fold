@@ -28,11 +28,9 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from api.routes import router
 from api.controllers.ledger_controller import router as ledger_router
-from api.controllers.telegram_controller import router as telegram_router
 from api.controllers.web_controller import router as web_router
-from api.config import get_settings
+from api.controllers.extraction_controller import router as extraction_router
 from api.db.connection import run_migrations
-from api.services.telegram_service import register_telegram_bot_commands
 
 # ─── Create Application ─────────────────────────────────────────────────
 app = FastAPI(
@@ -58,8 +56,8 @@ app.add_middleware(
 # ─── Register Routes ────────────────────────────────────────────────────
 app.include_router(router)
 app.include_router(ledger_router)
-app.include_router(telegram_router)
 app.include_router(web_router)
+app.include_router(extraction_router)
 
 
 @app.on_event("startup")
@@ -67,11 +65,6 @@ def startup_event():
     # ensure_schema() only creates missing tables; it does not wipe data.
     # For a one-time full reset set FOLD_RESET_DATABASE=1, restart, then unset.
     run_migrations()
-    try:
-        settings = get_settings()
-        register_telegram_bot_commands(settings.telegram_bot_token)
-    except Exception:
-        pass
 
 
 # ─── Health Check ────────────────────────────────────────────────────────

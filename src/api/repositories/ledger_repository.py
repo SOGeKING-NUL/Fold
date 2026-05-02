@@ -172,28 +172,6 @@ class LedgerRepository:
                 )
                 return list(cur.fetchall())
 
-    def try_claim_telegram_update(self, update_id: int) -> bool:
-        """
-        Return True if this Telegram update_id is new and was recorded.
-        Return False on replay (webhook retry) so handlers do not send duplicate messages.
-        """
-        if update_id <= 0:
-            return True
-        with get_db_connection() as conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    """
-                    INSERT INTO ingestion_events (source, external_event_id, payload_json)
-                    VALUES ('telegram_update', %s, '{}'::jsonb)
-                    ON CONFLICT (source, external_event_id) DO NOTHING
-                    RETURNING id
-                    """,
-                    (str(update_id),),
-                )
-                row = cur.fetchone()
-            conn.commit()
-        return row is not None
-
     def create_or_update_payment_profile(
         self,
         *,
@@ -609,80 +587,6 @@ class LedgerRepository:
                     (days, external_user_ref),
                 )
                 return cur.fetchall()
-
-    def get_session(self, telegram_user_id: int) -> dict | None:
-        with get_db_connection() as conn:
-            with conn.cursor(row_factory=dict_row) as cur:
-                cur.execute(
-                    """
-                    SELECT * FROM telegram_sessions WHERE telegram_user_id = %s
-                    """,
-                    (telegram_user_id,),
-                )
-                return cur.fetchone()
-
-    def upsert_session(self, telegram_user_id: int, state: str, payload: dict) -> None:
-        with get_db_connection() as conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    """
-                    INSERT INTO telegram_sessions (telegram_user_id, state, payload_json, updated_at)
-                    VALUES (%s, %s, %s::jsonb, NOW())
-                    ON CONFLICT (telegram_user_id) DO UPDATE
-                    SET state = EXCLUDED.state,
-                        payload_json = EXCLUDED.payload_json,
-                        updated_at = NOW()
-                    """,
-                    (telegram_user_id, state, Json(payload)),
-                )
-            conn.commit()
-
-    def upsert_pending_expense_media(
-        self,
-        telegram_user_id: int,
-        media_kind: str,
-        mime_type: str | None,
-        file_bytes: bytes,
-    ) -> None:
-        if media_kind not in ("image", "audio"):
-            raise ValueError("media_kind must be image or audio")
-        with get_db_connection() as conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    """
-                    INSERT INTO telegram_expense_pending_media (telegram_user_id, media_kind, mime_type, file_bytes)
-                    VALUES (%s, %s, %s, %s)
-                    ON CONFLICT (telegram_user_id) DO UPDATE
-                    SET media_kind = EXCLUDED.media_kind,
-                        mime_type = EXCLUDED.mime_type,
-                        file_bytes = EXCLUDED.file_bytes,
-                        updated_at = NOW()
-                    """,
-                    (telegram_user_id, media_kind, mime_type, file_bytes),
-                )
-            conn.commit()
-
-    def fetch_pending_expense_media(self, telegram_user_id: int) -> dict | None:
-        with get_db_connection() as conn:
-            with conn.cursor(row_factory=dict_row) as cur:
-                cur.execute(
-                    """
-                    SELECT telegram_user_id, media_kind, mime_type, file_bytes, updated_at
-                    FROM telegram_expense_pending_media
-                    WHERE telegram_user_id = %s
-                    """,
-                    (telegram_user_id,),
-                )
-                return cur.fetchone()
-
-    def delete_pending_expense_media(self, telegram_user_id: int) -> None:
-        with get_db_connection() as conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    "DELETE FROM telegram_expense_pending_media WHERE telegram_user_id = %s",
-                    (telegram_user_id,),
-                )
-            conn.commit()
 
     def insert_journal_media(
         self,
