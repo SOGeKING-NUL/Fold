@@ -44,7 +44,8 @@ const CATEGORY_COLORS: Record<string, string> = {
   income: "#22c55e",
 };
 
-export function categoryColor(key: string): string {
+export function categoryColor(key: string | null | undefined): string {
+  if (!key) return "#6b7280";
   return CATEGORY_COLORS[key.toLowerCase()] || "#6b7280";
 }
 

@@ -4,10 +4,9 @@ import { useEffect, useState, useCallback } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
   DashboardData,
-  exchangeToken,
   getDashboard,
-  logout,
 } from "@/lib/api";
+import { useAuth } from "@clerk/nextjs";
 import { Card, CardContent, CardTitle } from "@/components/ui/card";
 
 import SummaryCards from "@/components/SummaryCards";
@@ -27,6 +26,8 @@ export default function DashboardClient() {
   const router = useRouter();
   const searchParams = useSearchParams();
 
+  const { getToken, signOut } = useAuth();
+
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [data, setData] = useState<DashboardData | null>(null);
@@ -39,7 +40,9 @@ export default function DashboardClient() {
       setLoading(true);
       setError(null);
       try {
-        const d = await getDashboard(p);
+        const token = await getToken();
+        if (!token) throw new Error("Unauthorized");
+        const d = await getDashboard(p, token);
         setData(d);
       } catch (e: unknown) {
         const msg = e instanceof Error ? e.message : "Failed to load";
@@ -52,23 +55,11 @@ export default function DashboardClient() {
         setLoading(false);
       }
     },
-    [router]
+    [router, getToken]
   );
 
   useEffect(() => {
-    const token = searchParams.get("token");
-    if (token) {
-      exchangeToken(token)
-        .then(() => {
-          window.history.replaceState({}, "", "/");
-          fetchDashboard(period);
-        })
-        .catch(() => {
-          router.push("/login");
-        });
-    } else {
-      fetchDashboard(period);
-    }
+    fetchDashboard(period);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -78,11 +69,7 @@ export default function DashboardClient() {
   };
 
   const handleLogout = async () => {
-    try {
-      await logout();
-    } catch {
-      /* ignore */
-    }
+    await signOut();
     router.push("/login");
   };
 
@@ -184,7 +171,7 @@ export default function DashboardClient() {
       </div>
 
       {/* Account Balances */}
-      <BalanceCards balances={data.balances} />
+      <BalanceCards accounts={data.accounts} />
 
       {/* Payment method + Account breakdown */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">

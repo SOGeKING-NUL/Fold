@@ -9,6 +9,7 @@ export default function Page() {
   const router = useRouter();
   const { getToken, isLoaded, isSignedIn } = useAuth();
   const [isLoading, setIsLoading] = useState(false);
+  const [resultData, setResultData] = useState<any>(null);
   const [message, setMessage] = useState<string | React.ReactNode | null>(null);
 
   const handleSendMessage = async (text: string, files?: File[]) => {
@@ -19,6 +20,7 @@ export default function Page() {
 
     setIsLoading(true);
     setMessage(null);
+    setResultData(null);
 
     try {
       const token = await getToken();
@@ -28,24 +30,29 @@ export default function Page() {
 
       // Determine which endpoint to call based on input type
       if (files && files.length > 0) {
-        // Image upload
         const formData = new FormData();
         formData.append("file", files[0]);
+        
+        const isAudio = files[0].type.startsWith("audio/") || files[0].name.endsWith(".webm");
+        const endpoint = isAudio ? "/api/v1/web/extract/audio" : "/api/v1/web/extract/image";
 
-        response = await fetch(`${API_BASE}/api/v1/web/extract/image`, {
+        console.log("🚀 [Frontend] Uploading file to backend");
+        console.log("  - File name:", files[0].name);
+        console.log("  - File size:", files[0].size, "bytes");
+        console.log("  - File type:", files[0].type);
+        console.log("  - Endpoint:", endpoint);
+        console.log("  - API Base:", API_BASE);
+        console.log("  - Mode: SYNCHRONOUS (user waits for result)");
+
+        response = await fetch(`${API_BASE}${endpoint}`, {
           method: "POST",
           headers: {
             Authorization: `Bearer ${token}`,
           },
           body: formData,
         });
-      } else if (text.startsWith("[Voice message")) {
-        // Voice recording (placeholder - actual audio file would be sent)
-        setMessage("Voice recording feature coming soon!");
-        setIsLoading(false);
-        return;
       } else {
-        // Text input
+        // Text input (synchronous)
         response = await fetch(`${API_BASE}/api/v1/web/extract/text`, {
           method: "POST",
           headers: {
@@ -62,7 +69,20 @@ export default function Page() {
       }
 
       const result = await response.json();
-      setMessage(result.message || "Transaction saved successfully!");
+
+      console.log("✅ [Frontend] Response received");
+      console.log("  - Status:", result.status);
+      console.log("  - Source:", result.source);
+      console.log("  - Extracted data:", result.extracted_data);
+
+      // Handle synchronous response
+      setIsLoading(false);
+      
+      if (result.extracted_data) {
+        setResultData(result);
+      } else {
+        setMessage(result.message || "Transaction saved successfully!");
+      }
 
       // If user needs to add payment method, show special message
       if (result.ledger_result?.reason === "no_payment_method") {
@@ -79,12 +99,10 @@ export default function Page() {
         );
       }
 
-      // Optionally refresh or show success
       console.log("Extraction result:", result);
     } catch (error) {
       console.error("Error:", error);
       setMessage(error instanceof Error ? error.message : "An error occurred");
-    } finally {
       setIsLoading(false);
     }
   };
@@ -114,7 +132,7 @@ export default function Page() {
               >
                 View Dashboard
               </button>
-              <UserButton afterSignOutUrl="/" />
+              <UserButton />
             </>
           ) : (
             <button
@@ -151,10 +169,59 @@ export default function Page() {
           </div>
 
           {/* Feedback Message */}
-          {message && (
+          {message && !resultData && (
             <div className="text-center">
-              <div className="inline-block px-6 py-3 rounded-lg bg-gray-800/50 border border-gray-700/50 text-white">
-                {message}
+              <div className="inline-flex items-center gap-3 px-6 py-3 rounded-lg bg-gray-800/50 border border-gray-700/50 text-white">
+                {isLoading && (
+                  <div className="w-4 h-4 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
+                )}
+                <div>{message}</div>
+              </div>
+            </div>
+          )}
+
+          {/* Detailed Result Card */}
+          {resultData && resultData.extracted_data && (
+            <div className="text-left bg-gray-800/80 border border-gray-700/50 p-5 rounded-2xl text-sm text-gray-300 w-full max-w-xl mx-auto space-y-4 shadow-xl">
+              <div className="font-semibold text-white text-lg flex items-center justify-between">
+                <span>
+                  {resultData.extracted_data.payment_method || 'unknown'}
+                  {resultData.extracted_data.payment_provider ? ` ; provider ${resultData.extracted_data.payment_provider}` : ''}
+                  {` ; cash flow ${resultData.extracted_data.cash_flow || 'expense'}`}
+                </span>
+                <span className="text-blue-400 font-bold">
+                  ₹{resultData.extracted_data.amount}
+                </span>
+              </div>
+              
+              {resultData.extracted_data.merchant && (
+                <div>From {resultData.extracted_data.merchant}</div>
+              )}
+              
+              <div className="bg-gray-900/50 p-3 rounded-xl border border-gray-700/50">
+                Category: <span className="text-white font-medium capitalize">{resultData.extracted_data.category || 'unknown'}</span>.
+                {resultData.ledger_result?.id ? ` Journal #${resultData.ledger_result.id}.` : ''}
+                <br/>
+                <span className="text-gray-400 text-xs mt-1 block">
+                  Wrong category?{' '}
+                  <button onClick={() => alert("Change category feature coming soon!")} className="text-blue-400 hover:text-blue-300 transition-colors">
+                    Change category
+                  </button>
+                  , pick the right label, or use Back.
+                </span>
+              </div>
+              
+              <div className="text-gray-500 text-xs mt-4 border-t border-gray-700/50 pt-3 font-mono">
+                <div className="text-gray-400 mb-1">Debug:</div>
+                <ul className="space-y-1 pl-2 border-l-2 border-gray-700">
+                  <li>- amount_source: {resultData.extracted_data.amount_source || 'llm'}</li>
+                  <li>- upi_evidence: {resultData.extracted_data.payment_method === 'upi' ? 'True' : 'False'}</li>
+                  <li>- payment_provider: {resultData.extracted_data.payment_provider || 'None'}</li>
+                  <li>- bank_last4: {resultData.extracted_data.bank_account || 'None'}</li>
+                  <li>- llm_called: True</li>
+                  <li>- llm_success: True</li>
+                  <li className="break-words">- raw_text: {resultData.extracted_data.raw_text || resultData.extracted_data.text_transcript || 'N/A'}</li>
+                </ul>
               </div>
             </div>
           )}

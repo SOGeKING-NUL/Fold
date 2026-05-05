@@ -54,7 +54,7 @@ export default function SummaryCards({ summary }: Props) {
         return (
           <div
             key={c.key}
-            className="rounded-2xl border border-gray-200 bg-white p-4 flex flex-col gap-2 shadow-sm"
+            className="rounded-2xl border border-gray-700/50 bg-gray-800/40 p-4 flex flex-col gap-2 shadow-sm"
           >
             <div className="flex items-center justify-between">
               <span className="text-xs font-medium text-gray-500">

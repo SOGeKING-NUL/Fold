@@ -7,38 +7,6 @@ import { motion, AnimatePresence } from "framer-motion";
 // Utility function for className merging
 const cn = (...classes: (string | undefined | null | false)[]) => classes.filter(Boolean).join(" ");
 
-// Embedded CSS for minimal custom styles
-const styles = `
-*:focus-visible {
-  outline-offset: 0 !important;
-  --ring-offset: 0 !important;
-}
-
-textarea::-webkit-scrollbar {
-  width: 6px;
-}
-
-textarea::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-textarea::-webkit-scrollbar-thumb {
-  background-color: #444444;
-  border-radius: 3px;
-}
-
-textarea::-webkit-scrollbar-thumb:hover {
-  background-color: #555555;
-}
-`;
-
-// Inject styles into document
-if (typeof document !== 'undefined') {
-  const styleSheet = document.createElement("style");
-  styleSheet.innerText = styles;
-  document.head.appendChild(styleSheet);
-}
-
 // Textarea Component
 interface TextareaProps extends React.TextareaHTMLAttributes<HTMLTextAreaElement> {
   className?: string;
@@ -174,7 +142,7 @@ Button.displayName = "Button";
 interface VoiceRecorderProps {
   isRecording: boolean;
   onStartRecording: () => void;
-  onStopRecording: (duration: number) => void;
+  onStopRecording: (duration: number, audioBlob?: Blob) => void;
   visualizerBars?: number;
 }
 
@@ -186,23 +154,72 @@ const VoiceRecorder: React.FC<VoiceRecorderProps> = ({
 }) => {
   const [time, setTime] = React.useState(0);
   const timerRef = React.useRef<NodeJS.Timeout | null>(null);
+  const mediaRecorderRef = React.useRef<MediaRecorder | null>(null);
+  const audioChunksRef = React.useRef<Blob[]>([]);
+
+  const timeRef = React.useRef(0);
 
   React.useEffect(() => {
     if (isRecording) {
       onStartRecording();
-      timerRef.current = setInterval(() => setTime((t) => t + 1), 1000);
+      timeRef.current = 0;
+      setTime(0);
+      timerRef.current = setInterval(() => {
+        setTime((t) => {
+          timeRef.current = t + 1;
+          return t + 1;
+        });
+      }, 1000);
+      
+      // Start recording
+      audioChunksRef.current = [];
+      navigator.mediaDevices.getUserMedia({ audio: true })
+        .then((stream) => {
+          const mediaRecorder = new MediaRecorder(stream);
+          mediaRecorderRef.current = mediaRecorder;
+          
+          mediaRecorder.ondataavailable = (event) => {
+            if (event.data.size > 0) {
+              audioChunksRef.current.push(event.data);
+            }
+          };
+          
+          mediaRecorder.onstop = () => {
+            const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
+            onStopRecording(timeRef.current, audioBlob);
+            
+            // Stop all tracks to release microphone
+            stream.getTracks().forEach(track => track.stop());
+            setTime(0);
+          };
+          
+          mediaRecorder.start();
+        })
+        .catch((err) => {
+          console.error("Error accessing microphone:", err);
+          onStopRecording(0); // Call with no blob on error
+        });
+
     } else {
       if (timerRef.current) {
         clearInterval(timerRef.current);
         timerRef.current = null;
       }
-      onStopRecording(time);
-      setTime(0);
+      
+      if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+        mediaRecorderRef.current.stop();
+      } else if (time === 0) {
+          // just in case it was never started
+          setTime(0);
+      }
     }
     return () => {
       if (timerRef.current) clearInterval(timerRef.current);
+      if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+          mediaRecorderRef.current.stop();
+      }
     };
-  }, [isRecording, time, onStartRecording, onStopRecording]);
+  }, [isRecording]); // removed dependencies that cause loops or early stops
 
   const formatTime = (seconds: number) => {
     const mins = Math.floor(seconds / 60);
@@ -473,24 +490,9 @@ export const PromptInputBox = React.forwardRef((props: PromptInputBoxProps, ref:
   const [filePreviews, setFilePreviews] = React.useState<{ [key: string]: string }>({});
   const [selectedImage, setSelectedImage] = React.useState<string | null>(null);
   const [isRecording, setIsRecording] = React.useState(false);
-  const [showSearch, setShowSearch] = React.useState(false);
-  const [showThink, setShowThink] = React.useState(false);
-  const [showCanvas, setShowCanvas] = React.useState(false);
 
   const uploadInputRef = React.useRef<HTMLInputElement>(null);
   const promptBoxRef = React.useRef<HTMLDivElement>(null);
-
-  const handleToggleChange = (value: string) => {
-    if (value === "search") {
-      setShowSearch((prev) => !prev);
-      setShowThink(false);
-    } else if (value === "think") {
-      setShowThink((prev) => !prev);
-      setShowSearch(false);
-    }
-  };
-
-  const handleCanvasToggle = () => setShowCanvas((prev) => !prev);
 
   const isImageFile = (file: File) => file.type.startsWith("image/");
 
@@ -558,25 +560,31 @@ export const PromptInputBox = React.forwardRef((props: PromptInputBoxProps, ref:
 
   const handleSubmit = () => {
     if (input.trim() || files.length > 0) {
-      let messagePrefix = "";
-      if (showSearch) messagePrefix = "[Search: ";
-      else if (showThink) messagePrefix = "[Think: ";
-      else if (showCanvas) messagePrefix = "[Canvas: ";
-
-      const formattedInput = messagePrefix ? `${messagePrefix}${input}]` : input;
-      onSend(formattedInput, files);
+      onSend(input, files);
       setInput("");
       setFiles([]);
       setFilePreviews({});
     }
   };
 
-  const handleStartRecording = () => console.log("Started recording");
+  const handleStartRecording = () => {
+    console.log("Started recording");
+  };
 
-  const handleStopRecording = (duration: number) => {
+  const handleStopRecording = (duration: number, audioBlob?: Blob) => {
     console.log(`Stopped recording after ${duration} seconds`);
     setIsRecording(false);
-    onSend(`[Voice message - ${duration} seconds]`, []);
+    
+    if (audioBlob && duration > 0) {
+      // Create a File object from the Blob
+      const audioFile = new File([audioBlob], `voice_message_${Date.now()}.webm`, { type: 'audio/webm' });
+      onSend(`[Voice message - ${duration} seconds]`, [audioFile]);
+    } else {
+        // Fallback if recording failed or was too short
+        if (duration > 0) {
+            onSend(`[Voice message - ${duration} seconds]`, []);
+        }
+    }
   };
 
   const hasContent = input.trim() !== "" || files.length > 0;
@@ -636,15 +644,7 @@ export const PromptInputBox = React.forwardRef((props: PromptInputBoxProps, ref:
           )}
         >
           <PromptInputTextarea
-            placeholder={
-              showSearch
-                ? "Search the web..."
-                : showThink
-                ? "Think deeply..."
-                : showCanvas
-                ? "Create on canvas..."
-                : placeholder
-            }
+            placeholder={placeholder}
             className="text-base"
           />
         </div>
@@ -684,125 +684,6 @@ export const PromptInputBox = React.forwardRef((props: PromptInputBoxProps, ref:
               </button>
             </PromptInputAction>
 
-            <div className="flex items-center">
-              <button
-                type="button"
-                onClick={() => handleToggleChange("search")}
-                className={cn(
-                  "rounded-full transition-all flex items-center gap-1 px-2 py-1 border h-8",
-                  showSearch
-                    ? "bg-[#1EAEDB]/15 border-[#1EAEDB] text-[#1EAEDB]"
-                    : "bg-transparent border-transparent text-[#9CA3AF] hover:text-[#D1D5DB]"
-                )}
-              >
-                <div className="w-5 h-5 flex items-center justify-center flex-shrink-0">
-                  <motion.div
-                    animate={{ rotate: showSearch ? 360 : 0, scale: showSearch ? 1.1 : 1 }}
-                    whileHover={{
-                      rotate: showSearch ? 360 : 15,
-                      scale: 1.1,
-                      transition: { type: "spring", stiffness: 300, damping: 10 },
-                    }}
-                    transition={{ type: "spring", stiffness: 260, damping: 25 }}
-                  >
-                    <Globe className={cn("w-4 h-4", showSearch ? "text-[#1EAEDB]" : "text-inherit")} />
-                  </motion.div>
-                </div>
-                <AnimatePresence>
-                  {showSearch && (
-                    <motion.span
-                      initial={{ width: 0, opacity: 0 }}
-                      animate={{ width: "auto", opacity: 1 }}
-                      exit={{ width: 0, opacity: 0 }}
-                      transition={{ duration: 0.2 }}
-                      className="text-xs overflow-hidden whitespace-nowrap text-[#1EAEDB] flex-shrink-0"
-                    >
-                      Search
-                    </motion.span>
-                  )}
-                </AnimatePresence>
-              </button>
-
-              <CustomDivider />
-
-              <button
-                type="button"
-                onClick={() => handleToggleChange("think")}
-                className={cn(
-                  "rounded-full transition-all flex items-center gap-1 px-2 py-1 border h-8",
-                  showThink
-                    ? "bg-[#8B5CF6]/15 border-[#8B5CF6] text-[#8B5CF6]"
-                    : "bg-transparent border-transparent text-[#9CA3AF] hover:text-[#D1D5DB]"
-                )}
-              >
-                <div className="w-5 h-5 flex items-center justify-center flex-shrink-0">
-                  <motion.div
-                    animate={{ rotate: showThink ? 360 : 0, scale: showThink ? 1.1 : 1 }}
-                    whileHover={{
-                      rotate: showThink ? 360 : 15,
-                      scale: 1.1,
-                      transition: { type: "spring", stiffness: 300, damping: 10 },
-                    }}
-                    transition={{ type: "spring", stiffness: 260, damping: 25 }}
-                  >
-                    <BrainCog className={cn("w-4 h-4", showThink ? "text-[#8B5CF6]" : "text-inherit")} />
-                  </motion.div>
-                </div>
-                <AnimatePresence>
-                  {showThink && (
-                    <motion.span
-                      initial={{ width: 0, opacity: 0 }}
-                      animate={{ width: "auto", opacity: 1 }}
-                      exit={{ width: 0, opacity: 0 }}
-                      transition={{ duration: 0.2 }}
-                      className="text-xs overflow-hidden whitespace-nowrap text-[#8B5CF6] flex-shrink-0"
-                    >
-                      Think
-                    </motion.span>
-                  )}
-                </AnimatePresence>
-              </button>
-
-              <CustomDivider />
-
-              <button
-                type="button"
-                onClick={handleCanvasToggle}
-                className={cn(
-                  "rounded-full transition-all flex items-center gap-1 px-2 py-1 border h-8",
-                  showCanvas
-                    ? "bg-[#F97316]/15 border-[#F97316] text-[#F97316]"
-                    : "bg-transparent border-transparent text-[#9CA3AF] hover:text-[#D1D5DB]"
-                )}
-              >
-                <div className="w-5 h-5 flex items-center justify-center flex-shrink-0">
-                  <motion.div
-                    animate={{ rotate: showCanvas ? 360 : 0, scale: showCanvas ? 1.1 : 1 }}
-                    whileHover={{
-                      rotate: showCanvas ? 360 : 15,
-                      scale: 1.1,
-                      transition: { type: "spring", stiffness: 300, damping: 10 },
-                    }}
-                    transition={{ type: "spring", stiffness: 260, damping: 25 }}
-                  >
-                    <FolderCode className={cn("w-4 h-4", showCanvas ? "text-[#F97316]" : "text-inherit")} />
-                  </motion.div>
-                </div>
-                <AnimatePresence>
-                  {showCanvas && (
-                    <motion.span
-                      initial={{ width: 0, opacity: 0 }}
-                      animate={{ width: "auto", opacity: 1 }}
-                      exit={{ width: 0, opacity: 0 }}
-                      transition={{ duration: 0.2 }}
-                      className="text-xs overflow-hidden whitespace-nowrap text-[#F97316] flex-shrink-0"
-                    >
-                      Canvas
-                    </motion.span>
-                  )}
-                </AnimatePresence>
-              </button>
-            </div>
           </div>
 
           <PromptInputAction

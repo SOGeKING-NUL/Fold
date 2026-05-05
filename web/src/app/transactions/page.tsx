@@ -2,14 +2,18 @@
 
 import { useEffect, useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
-import { Transaction, getTransactions } from "@/lib/api";
+import { Transaction, Account, getTransactions, getDashboard } from "@/lib/api";
 import TransactionTable from "@/components/TransactionTable";
+import BalanceCards from "@/components/BalanceCards";
+import { useAuth } from "@clerk/nextjs";
 
 const PAGE_SIZE = 50;
 
 export default function TransactionsPage() {
   const router = useRouter();
+  const { getToken } = useAuth();
   const [loading, setLoading] = useState(true);
+  const [accounts, setAccounts] = useState<Account[]>([]);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [offset, setOffset] = useState(0);
   const [hasMore, setHasMore] = useState(true);
@@ -18,7 +22,16 @@ export default function TransactionsPage() {
     async (newOffset: number, append = false) => {
       setLoading(true);
       try {
-        const res = await getTransactions(PAGE_SIZE, newOffset);
+        const token = await getToken();
+        if (!token) throw new Error("Unauthorized");
+        const res = await getTransactions(PAGE_SIZE, newOffset, token);
+        
+        if (newOffset === 0) {
+          // Also fetch accounts for the top balance cards on initial load
+          const dash = await getDashboard("monthly", token);
+          setAccounts(dash.accounts || []);
+        }
+
         if (append) {
           setTransactions((prev) => [...prev, ...res.transactions]);
         } else {
@@ -35,7 +48,7 @@ export default function TransactionsPage() {
         setLoading(false);
       }
     },
-    [router]
+    [router, getToken]
   );
 
   useEffect(() => {
@@ -43,32 +56,43 @@ export default function TransactionsPage() {
   }, [fetchPage]);
 
   return (
-    <main className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-8 pb-16 space-y-6">
-      <header className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold text-gray-900 tracking-tight">
+    <div className="min-h-screen bg-gradient-to-br from-black via-gray-900 to-black font-sans">
+      <header className="w-full px-6 py-4 flex items-center justify-between border-b border-gray-800/50">
+        <h1 className="text-xl font-semibold text-white tracking-tight">
           All Transactions
         </h1>
         <button
           onClick={() => router.push("/")}
-          className="text-xs font-medium text-gray-400 hover:text-gray-600 transition-colors"
+          className="text-xs font-medium text-gray-400 hover:text-white transition-colors"
         >
           Back to dashboard
         </button>
       </header>
 
-      <TransactionTable transactions={transactions} />
+      <main className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-8 pb-16 space-y-10">
+        <BalanceCards accounts={accounts} />
+
+      {loading && transactions.length === 0 ? (
+        <div className="flex flex-col items-center justify-center py-20 gap-3">
+          <div className="w-10 h-10 border-4 border-gray-800 border-t-blue-500 rounded-full animate-spin" />
+          <span className="text-gray-500 text-sm animate-pulse">Fetching transactions...</span>
+        </div>
+      ) : (
+        <TransactionTable transactions={transactions} />
+      )}
 
       {hasMore && (
-        <div className="flex justify-center">
+        <div className="flex justify-center pt-8">
           <button
             onClick={() => fetchPage(offset, true)}
             disabled={loading}
-            className="px-5 py-2 bg-gray-900 text-white rounded-xl text-sm font-medium hover:bg-gray-800 transition-colors disabled:opacity-50"
+            className="px-8 py-3 bg-gray-800/50 border border-gray-700/50 hover:bg-gray-800/80 text-white rounded-2xl text-sm font-semibold transition-all duration-300 disabled:opacity-50 hover:scale-[1.02] active:scale-[0.98]"
           >
-            {loading ? "Loading..." : "Load more"}
+            {loading ? "Loading more..." : "Show older transactions"}
           </button>
         </div>
       )}
-    </main>
+      </main>
+    </div>
   );
 }

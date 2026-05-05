@@ -17,8 +17,8 @@ export default function PeriodToggle({ period, onChange }: Props) {
           className={cn(
             "px-4 py-1.5 text-sm font-medium rounded-lg transition-all",
             period === p
-              ? "bg-white text-gray-900 shadow-sm"
-              : "text-gray-500 hover:text-gray-700"
+              ? "bg-gray-700 text-white shadow-sm"
+              : "text-gray-400 hover:text-gray-200"
           )}
         >
           {p === "weekly" ? "Week" : "Month"}

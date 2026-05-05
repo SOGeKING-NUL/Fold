@@ -1,5 +1,6 @@
 import cv2
 import numpy as np
+import torch # Import torch first to prevent WinError 127 shm.dll collision with paddle
 from paddleocr import PaddleOCR
 import re
 
