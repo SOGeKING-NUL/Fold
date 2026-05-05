@@ -39,20 +39,20 @@ export default function TransactionTable({
   return (
     <section>
       <div className="flex items-center justify-between mb-3 px-1">
-        <h2 className="text-xs font-medium text-gray-400 uppercase tracking-wider">
+        <h2 className="text-xs font-medium text-[#666666] uppercase tracking-wider">
           Transaction History
         </h2>
         {showViewAll && (
           <button
             onClick={onViewAll}
-            className="text-xs font-medium text-blue-400 hover:text-blue-300 transition-colors"
+            className="text-xs font-medium text-[#156d95] hover:text-[#146e96] transition-colors cursor-pointer"
           >
             View all
           </button>
         )}
       </div>
-      <div className="rounded-2xl border border-gray-800/50 bg-gray-800/20 overflow-hidden backdrop-blur-sm shadow-2xl">
-        <div className="divide-y divide-gray-800/50">
+      <div className="rounded-2xl border border-[#d0d0d0] bg-gradient-to-br from-[#f8f8f8] to-[#ececec] overflow-hidden shadow-sm">
+        <div className="divide-y divide-[#e0e0e0]">
           {transactions.map((tx: any) => {
             const category = tx.category || tx.type;
             const amount = tx.amount || 0;
@@ -60,28 +60,28 @@ export default function TransactionTable({
             return (
               <div
                 key={tx.id}
-                className="flex items-center gap-4 px-5 py-4 hover:bg-gray-800/40 transition-all duration-300 group"
+                className="flex items-center gap-4 px-5 py-4 hover:bg-white transition-all duration-300 group"
               >
                 <div
-                  className="w-2 h-2 rounded-full flex-shrink-0 shadow-[0_0_8px_rgba(0,0,0,0.5)]"
+                  className="w-2 h-2 rounded-full flex-shrink-0 shadow-sm"
                   style={{ backgroundColor: categoryColor(category) }}
                 />
                 <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium text-white group-hover:text-blue-400 transition-colors truncate">
+                  <p className="text-sm font-medium text-[#202020] group-hover:text-[#156d95] transition-colors truncate">
                     {tx.description || capitalize(tx.type || "transaction")}
                   </p>
-                  <p className="text-[11px] text-gray-500 flex items-center gap-2 mt-1">
+                  <p className="text-[11px] text-[#999999] flex items-center gap-2 mt-1">
                     <span>{formatDateTime(tx.occurred_at)}</span>
-                    <span className="w-1 h-1 bg-gray-800 rounded-full" />
+                    <span className="w-1 h-1 bg-[#d0d0d0] rounded-full" />
                     {tx.source && (
-                      <span className="text-gray-500">
+                      <span className="text-[#999999]">
                         via {capitalize(tx.source)}
                       </span>
                     )}
                   </p>
                 </div>
                 <div className="text-right flex-shrink-0 space-y-1">
-                  <p className="text-sm font-bold text-white tabular-nums">
+                  <p className="text-sm font-bold text-[#202020] tabular-nums">
                     {formatINR(amount)}
                   </p>
                   <div className="scale-75 origin-right">

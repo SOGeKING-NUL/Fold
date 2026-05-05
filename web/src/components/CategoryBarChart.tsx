@@ -20,7 +20,7 @@ interface Props {
 export default function CategoryBarChart({ data }: Props) {
   if (!data.length) {
     return (
-      <p className="text-gray-400 text-sm">No category data for this period.</p>
+      <p className="text-[#999999] text-sm">No category data for this period.</p>
     );
   }
 
@@ -38,20 +38,20 @@ export default function CategoryBarChart({ data }: Props) {
         <BarChart data={chartData} layout="vertical" barCategoryGap="20%">
           <CartesianGrid
             strokeDasharray="3 3"
-            stroke="#f3f4f6"
+            stroke="#e5e5e5"
             horizontal={false}
           />
           <XAxis
             type="number"
             tickFormatter={(v) => formatINR(Number(v))}
-            tick={{ fontSize: 10, fill: "#9ca3af" }}
+            tick={{ fontSize: 10, fill: "#999999" }}
             axisLine={false}
             tickLine={false}
           />
           <YAxis
             type="category"
             dataKey="name"
-            tick={{ fontSize: 12, fill: "#6b7280" }}
+            tick={{ fontSize: 12, fill: "#666666" }}
             axisLine={false}
             tickLine={false}
             width={100}
@@ -60,10 +60,10 @@ export default function CategoryBarChart({ data }: Props) {
             formatter={(value) => formatINR(Number(value))}
             contentStyle={{
               backgroundColor: "#ffffff",
-              border: "1px solid #e5e7eb",
+              border: "1px solid #e5e5e5",
               borderRadius: "0.75rem",
               fontSize: "0.75rem",
-              boxShadow: "0 4px 6px -1px rgb(0 0 0 / 0.05)",
+              boxShadow: "0 2px 4px rgba(0,0,0,0.05)",
             }}
           />
           <Bar dataKey="amount" radius={[0, 6, 6, 0]}>

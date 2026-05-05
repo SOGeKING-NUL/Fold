@@ -47,29 +47,29 @@ const cards = [
 
 export default function SummaryCards({ summary }: Props) {
   return (
-    <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+    <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
       {cards.map((c) => {
         const value = summary[c.key];
         const Icon = c.icon;
         return (
           <div
             key={c.key}
-            className="rounded-2xl border border-gray-700/50 bg-gray-800/40 p-4 flex flex-col gap-2 shadow-sm"
+            className="rounded-2xl border border-[#d0d0d0] bg-linear-to-br from-[#f8f8f8] to-[#ececec] p-5 flex flex-col gap-3 shadow-sm hover:shadow-md hover:border-[#156d95] transition-all duration-300"
           >
             <div className="flex items-center justify-between">
-              <span className="text-xs font-medium text-gray-500">
+              <span className="text-xs font-medium text-[#666666] uppercase tracking-wider">
                 {c.label}
               </span>
               <div
                 className={cn(
-                  "w-7 h-7 rounded-lg flex items-center justify-center",
+                  "w-8 h-8 rounded-xl flex items-center justify-center",
                   c.iconBg
                 )}
               >
-                <Icon className="w-3.5 h-3.5" />
+                <Icon className="w-4 h-4" />
               </div>
             </div>
-            <span className={cn("text-xl font-bold tabular-nums", c.color)}>
+            <span className={cn("text-2xl font-bold text-[#156d95] tabular-nums")}>
               {formatINR(value)}
             </span>
           </div>

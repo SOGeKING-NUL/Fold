@@ -15,21 +15,21 @@ export default function BreakdownList({ data, title }: Props) {
 
   return (
     <section>
-      <h2 className="text-sm font-semibold text-gray-500 mb-3">{title}</h2>
-      <div className="space-y-3">
+      <h2 className="text-sm font-semibold text-[#666666] mb-4">{title}</h2>
+      <div className="space-y-4">
         {data.map((row) => {
           const pct = (row.amount_minor / max) * 100;
           return (
             <div key={row.key}>
-              <div className="flex justify-between text-sm mb-1">
-                <span className="text-gray-700 truncate">
+              <div className="flex justify-between text-sm mb-2">
+                <span className="text-[#202020] truncate font-medium">
                   {capitalize(row.key)}
                 </span>
-                <span className="text-gray-500 tabular-nums ml-2">
+                <span className="text-[#666666] tabular-nums ml-2">
                   {formatINR(row.amount_minor)}
                 </span>
               </div>
-              <div className="h-2 rounded-full bg-gray-100 overflow-hidden">
+              <div className="h-2.5 rounded-full bg-white overflow-hidden border border-[#e5e5e5]">
                 <div
                   className="h-full rounded-full transition-all duration-500"
                   style={{

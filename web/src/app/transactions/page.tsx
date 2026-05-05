@@ -56,26 +56,14 @@ export default function TransactionsPage() {
   }, [fetchPage]);
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-black via-gray-900 to-black font-sans">
-      <header className="w-full px-6 py-4 flex items-center justify-between border-b border-gray-800/50">
-        <h1 className="text-xl font-semibold text-white tracking-tight">
-          All Transactions
-        </h1>
-        <button
-          onClick={() => router.push("/")}
-          className="text-xs font-medium text-gray-400 hover:text-white transition-colors"
-        >
-          Back to dashboard
-        </button>
-      </header>
-
-      <main className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-8 pb-16 space-y-10">
+    <div className="min-h-screen bg-white font-sans">
+      <main className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-8 pb-16 space-y-10 mt-16">
         <BalanceCards accounts={accounts} />
 
       {loading && transactions.length === 0 ? (
         <div className="flex flex-col items-center justify-center py-20 gap-3">
-          <div className="w-10 h-10 border-4 border-gray-800 border-t-blue-500 rounded-full animate-spin" />
-          <span className="text-gray-500 text-sm animate-pulse">Fetching transactions...</span>
+          <div className="w-10 h-10 border-4 border-[#f5f5f5] border-t-[#156d95] rounded-full animate-spin" />
+          <span className="text-[#666666] text-sm animate-pulse">Fetching transactions...</span>
         </div>
       ) : (
         <TransactionTable transactions={transactions} />
@@ -86,7 +74,7 @@ export default function TransactionsPage() {
           <button
             onClick={() => fetchPage(offset, true)}
             disabled={loading}
-            className="px-8 py-3 bg-gray-800/50 border border-gray-700/50 hover:bg-gray-800/80 text-white rounded-2xl text-sm font-semibold transition-all duration-300 disabled:opacity-50 hover:scale-[1.02] active:scale-[0.98]"
+            className="px-8 py-3 bg-[#fafafa] border border-[#e5e5e5] hover:bg-white text-[#202020] rounded-2xl text-sm font-semibold transition-all duration-300 disabled:opacity-50 hover:scale-[1.02] active:scale-[0.98] cursor-pointer"
           >
             {loading ? "Loading more..." : "Show older transactions"}
           </button>

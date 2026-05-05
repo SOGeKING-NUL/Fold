@@ -9,16 +9,16 @@ interface Props {
 
 export default function PeriodToggle({ period, onChange }: Props) {
   return (
-    <div className="flex rounded-xl bg-gray-100 p-0.5 w-fit">
+    <div className="flex rounded-xl bg-[#f5f5f5] p-1 w-fit border border-[#e5e5e5]">
       {(["weekly", "monthly"] as const).map((p) => (
         <button
           key={p}
           onClick={() => onChange(p)}
           className={cn(
-            "px-4 py-1.5 text-sm font-medium rounded-lg transition-all",
+            "px-4 py-1.5 text-sm font-medium rounded-lg transition-all cursor-pointer",
             period === p
-              ? "bg-gray-700 text-white shadow-sm"
-              : "text-gray-400 hover:text-gray-200"
+              ? "bg-[#156d95] text-white shadow-sm"
+              : "text-[#666666] hover:text-[#202020]"
           )}
         >
           {p === "weekly" ? "Week" : "Month"}

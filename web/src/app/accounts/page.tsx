@@ -75,8 +75,8 @@ export default function AccountsPage() {
 
   if (!isLoaded || loading) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-black via-gray-900 to-black flex items-center justify-center">
-        <div className="text-white">Loading...</div>
+      <div className="min-h-screen bg-white flex items-center justify-center">
+        <div className="text-[#202020]">Loading...</div>
       </div>
     );
   }
@@ -97,29 +97,14 @@ export default function AccountsPage() {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-black via-gray-900 to-black font-sans">
-      <header className="w-full px-6 py-4 flex items-center justify-between border-b border-gray-800/50">
-        <div className="flex items-center gap-4">
-          <button
-            onClick={() => router.push("/")}
-            className="text-gray-400 hover:text-white transition-colors"
-          >
-            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
-            </svg>
-          </button>
-          <h1 className="text-xl font-semibold text-white">Payment Methods & Accounts</h1>
-        </div>
-        <UserButton afterSignOutUrl="/" />
-      </header>
-
-      <main className="max-w-4xl mx-auto px-4 py-8">
+    <div className="min-h-screen bg-white font-sans">
+      <main className="max-w-4xl mx-auto px-4 py-8 mt-16">
         {!isFormOpen && (
           <div className="mb-6 flex justify-between items-center">
-            <h2 className="text-lg text-gray-300">Your Accounts</h2>
+            <h2 className="text-lg text-[#202020]">Your Accounts</h2>
             <button
               onClick={handleOpenAdd}
-              className="px-5 py-2.5 bg-blue-500 hover:bg-blue-600 text-white rounded-xl font-medium transition-colors flex items-center gap-2"
+              className="px-5 py-2.5 bg-[#156d95] hover:bg-[#146e96] text-white rounded-xl font-medium transition-colors flex items-center gap-2 cursor-pointer"
             >
               <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
@@ -145,8 +130,8 @@ export default function AccountsPage() {
             <div className="space-y-4 mb-12">
               {accounts.length === 0 ? (
                 <div className="text-center py-12">
-                  <p className="text-gray-400 mb-4">No accounts added yet.</p>
-                  <button onClick={handleOpenAdd} className="text-blue-400 hover:text-blue-300 transition-colors">
+                  <p className="text-[#666666] mb-4">No accounts added yet.</p>
+                  <button onClick={handleOpenAdd} className="text-[#156d95] hover:text-[#146e96] transition-colors cursor-pointer">
                     Setup your first account
                   </button>
                 </div>
@@ -158,7 +143,7 @@ export default function AccountsPage() {
             </div>
 
             <div className="mb-6 flex justify-between items-center">
-              <h2 className="text-lg text-gray-300">Linked Payment Apps (UPI)</h2>
+              <h2 className="text-lg text-[#202020]">Linked Payment Apps (UPI)</h2>
             </div>
             
             <PaymentProfilesSection profiles={profiles} accounts={accounts} onRefresh={fetchAccounts} />
@@ -218,14 +203,14 @@ function PaymentProfilesSection({ profiles, accounts, onRefresh }: { profiles: P
   return (
     <div className="space-y-4">
       {profiles.map(p => (
-        <div key={p.id} className="p-4 bg-gray-800/40 border border-gray-700/50 rounded-2xl flex justify-between items-center">
+        <div key={p.id} className="p-4 bg-gradient-to-br from-[#f8f8f8] to-[#ececec] border border-[#d0d0d0] rounded-2xl flex justify-between items-center hover:border-[#156d95] hover:shadow-md transition-all duration-300">
           <div>
-            <h3 className="text-white font-medium capitalize">{p.provider}</h3>
-            <p className="text-sm text-gray-400">{p.profile_name}</p>
+            <h3 className="text-[#202020] font-medium capitalize">{p.provider}</h3>
+            <p className="text-sm text-[#666666]">{p.profile_name}</p>
           </div>
           <div className="text-right">
-            <span className="text-xs text-gray-400 block mb-1">Linked to</span>
-            <span className="px-2 py-1 bg-blue-500/10 text-blue-400 rounded text-xs border border-blue-500/20">
+            <span className="text-xs text-[#666666] block mb-1">Linked to</span>
+            <span className="px-2 py-1 bg-[#156d95]/10 text-[#156d95] rounded text-xs border border-[#156d95]/20">
               {p.linked_account_name}
             </span>
           </div>
@@ -235,7 +220,7 @@ function PaymentProfilesSection({ profiles, accounts, onRefresh }: { profiles: P
       {!isLinking ? (
         <button
           onClick={() => setIsLinking(true)}
-          className="w-full p-4 border border-dashed border-gray-700 rounded-2xl text-gray-400 hover:text-white hover:border-gray-500 transition-colors flex items-center justify-center gap-2"
+          className="w-full p-4 border border-dashed border-[#d0d0d0] rounded-2xl text-[#666666] hover:text-[#202020] hover:border-[#156d95] hover:bg-gradient-to-br hover:from-[#f8f8f8] hover:to-[#ececec] transition-all duration-300 flex items-center justify-center gap-2 cursor-pointer"
         >
           <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
@@ -243,14 +228,14 @@ function PaymentProfilesSection({ profiles, accounts, onRefresh }: { profiles: P
           Link UPI / Payment App
         </button>
       ) : (
-        <form onSubmit={handleLink} className="p-5 bg-gray-800/50 border border-gray-700/50 rounded-2xl space-y-4">
+        <form onSubmit={handleLink} className="p-5 bg-gradient-to-br from-[#f8f8f8] to-[#ececec] border border-[#d0d0d0] rounded-2xl space-y-4">
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
             <div>
-              <label className="block text-xs text-gray-400 mb-1">Provider</label>
+              <label className="block text-xs text-[#666666] mb-1">Provider</label>
               <select
                 value={provider}
                 onChange={e => setProvider(e.target.value)}
-                className="w-full px-3 py-2 bg-gray-900 border border-gray-700 rounded-lg text-white focus:outline-none focus:border-blue-500"
+                className="w-full px-3 py-2 bg-white border border-[#e5e5e5] rounded-lg text-[#202020] focus:outline-none focus:border-[#156d95]"
               >
                 <option value="gpay">Google Pay</option>
                 <option value="phonepe">PhonePe</option>
@@ -262,22 +247,22 @@ function PaymentProfilesSection({ profiles, accounts, onRefresh }: { profiles: P
               </select>
             </div>
             <div>
-              <label className="block text-xs text-gray-400 mb-1">Profile Name</label>
+              <label className="block text-xs text-[#666666] mb-1">Profile Name</label>
               <input
                 type="text"
                 value={profileName}
                 onChange={e => setProfileName(e.target.value)}
                 placeholder="e.g. Personal GPay"
-                className="w-full px-3 py-2 bg-gray-900 border border-gray-700 rounded-lg text-white focus:outline-none focus:border-blue-500"
+                className="w-full px-3 py-2 bg-white border border-[#e5e5e5] rounded-lg text-[#202020] focus:outline-none focus:border-[#156d95]"
               />
             </div>
             <div>
-              <label className="block text-xs text-gray-400 mb-1">Link to Bank Account</label>
+              <label className="block text-xs text-[#666666] mb-1">Link to Bank Account</label>
               <select
                 required
                 value={linkedAccount}
                 onChange={e => setLinkedAccount(e.target.value)}
-                className="w-full px-3 py-2 bg-gray-900 border border-gray-700 rounded-lg text-white focus:outline-none focus:border-blue-500"
+                className="w-full px-3 py-2 bg-white border border-[#e5e5e5] rounded-lg text-[#202020] focus:outline-none focus:border-[#156d95]"
               >
                 <option value="">Select Account...</option>
                 {accounts.filter(a => a.account_type === "bank").map(a => (
@@ -287,10 +272,10 @@ function PaymentProfilesSection({ profiles, accounts, onRefresh }: { profiles: P
             </div>
           </div>
           <div className="flex gap-3 justify-end">
-            <button type="button" onClick={() => setIsLinking(false)} className="px-4 py-2 bg-gray-700 hover:bg-gray-600 text-white rounded-lg text-sm font-medium transition-colors">
+            <button type="button" onClick={() => setIsLinking(false)} className="px-4 py-2 bg-[#f5f5f5] hover:bg-[#e5e5e5] text-[#202020] rounded-lg text-sm font-medium transition-colors cursor-pointer">
               Cancel
             </button>
-            <button type="submit" className="px-4 py-2 bg-blue-500 hover:bg-blue-600 text-white rounded-lg text-sm font-medium transition-colors">
+            <button type="submit" className="px-4 py-2 bg-[#156d95] hover:bg-[#146e96] text-white rounded-lg text-sm font-medium transition-colors cursor-pointer">
               Link App
             </button>
           </div>
@@ -300,9 +285,6 @@ function PaymentProfilesSection({ profiles, accounts, onRefresh }: { profiles: P
   );
 }
 
-// ----------------------------------------------------------------------
-// Account Card Component
-// ----------------------------------------------------------------------
 function AccountCard({ account, onEdit, onRefresh }: { account: Account; onEdit: () => void; onRefresh: () => void }) {
   const { getToken } = useAuth();
   const [isAddingFunds, setIsAddingFunds] = useState(false);
@@ -380,30 +362,30 @@ function AccountCard({ account, onEdit, onRefresh }: { account: Account; onEdit:
   };
 
   const typeColors: Record<string, string> = {
-    cash: "bg-green-500/10 text-green-400 border-green-500/20",
-    bank: "bg-blue-500/10 text-blue-400 border-blue-500/20",
-    credit: "bg-purple-500/10 text-purple-400 border-purple-500/20",
+    cash: "bg-green-500/10 text-green-600 border-green-500/20",
+    bank: "bg-[#156d95]/10 text-[#156d95] border-[#156d95]/20",
+    credit: "bg-purple-500/10 text-purple-600 border-purple-500/20",
   };
 
   const balance = account.balance !== undefined ? account.balance / 100 : 0;
   const isNegative = balance < 0;
 
   return (
-    <div className="p-5 bg-gray-800/40 border border-gray-700/50 rounded-2xl hover:border-gray-600/50 transition-colors">
+    <div className="p-5 bg-gradient-to-br from-[#f8f8f8] to-[#ececec] border border-[#d0d0d0] rounded-2xl hover:border-[#156d95] hover:shadow-md transition-all duration-300">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div className="flex-1">
           <div className="flex items-center gap-3 mb-2">
-            <h3 className="text-lg font-semibold text-white">{account.name}</h3>
+            <h3 className="text-lg font-semibold text-[#202020]">{account.name}</h3>
             <span className={`px-2 py-1 rounded-md text-xs font-medium border ${typeColors[account.account_type] || typeColors.asset}`}>
               {account.account_type.charAt(0).toUpperCase() + account.account_type.slice(1)}
             </span>
             {account.is_default && (
-              <span className="px-2 py-1 rounded-md text-xs font-medium bg-yellow-500/10 text-yellow-400 border border-yellow-500/20">
+              <span className="px-2 py-1 rounded-md text-xs font-medium bg-yellow-500/10 text-yellow-600 border border-yellow-500/20">
                 Default
               </span>
             )}
           </div>
-          <div className="flex flex-wrap items-center gap-3 text-sm text-gray-400">
+          <div className="flex flex-wrap items-center gap-3 text-sm text-[#666666]">
             {account.institution_name && account.account_type !== "cash" && <span>{account.institution_name}</span>}
             {account.account_number_last4 && <span>•••• {account.account_number_last4}</span>}
           </div>
@@ -412,26 +394,26 @@ function AccountCard({ account, onEdit, onRefresh }: { account: Account; onEdit:
         <div className="flex flex-col items-start sm:items-end gap-3">
           {account.balance !== undefined && (
             <div className="text-left sm:text-right">
-              <div className={`text-2xl font-bold ${isNegative ? 'text-red-400' : 'text-white'}`}>
+              <div className={`text-2xl font-bold ${isNegative ? 'text-red-500' : 'text-[#202020]'}`}>
                 ₹{balance.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
               </div>
-              <div className="text-xs text-gray-400 uppercase tracking-wider">Current Balance</div>
+              <div className="text-xs text-[#666666] uppercase tracking-wider">Current Balance</div>
             </div>
           )}
           <div className="flex items-center gap-2 flex-wrap">
             {!account.is_default && (
               <button 
                 onClick={handleSetDefault} 
-                className="text-xs px-3 py-1.5 bg-yellow-500/10 hover:bg-yellow-500/20 text-yellow-400 border border-yellow-500/20 rounded-lg transition-colors"
+                className="text-xs px-3 py-1.5 bg-yellow-500/10 hover:bg-yellow-500/20 text-yellow-600 border border-yellow-500/20 rounded-lg transition-colors cursor-pointer"
               >
                 Set as Default
               </button>
             )}
-            <button onClick={onEdit} className="text-xs px-3 py-1.5 bg-gray-700 hover:bg-gray-600 text-white rounded-lg transition-colors">
+            <button onClick={onEdit} className="text-xs px-3 py-1.5 bg-[#f5f5f5] hover:bg-[#e5e5e5] text-[#202020] rounded-lg transition-colors cursor-pointer">
               Edit
             </button>
             {account.account_type !== "credit" && !isAddingFunds && (
-              <button onClick={() => setIsAddingFunds(true)} className="text-xs px-3 py-1.5 bg-blue-500 hover:bg-blue-600 text-white rounded-lg transition-colors">
+              <button onClick={() => setIsAddingFunds(true)} className="text-xs px-3 py-1.5 bg-[#156d95] hover:bg-[#146e96] text-white rounded-lg transition-colors cursor-pointer">
                 Add Funds
               </button>
             )}
@@ -440,9 +422,9 @@ function AccountCard({ account, onEdit, onRefresh }: { account: Account; onEdit:
       </div>
 
       {isAddingFunds && (
-        <form onSubmit={handleAddFunds} className="mt-4 p-4 bg-gray-900/50 rounded-xl border border-gray-700 flex items-end gap-3">
+        <form onSubmit={handleAddFunds} className="mt-4 p-4 bg-white rounded-xl border border-[#e5e5e5] flex items-end gap-3">
           <div className="flex-1 max-w-xs">
-            <label className="block text-xs text-gray-400 mb-1">Amount to Add (₹)</label>
+            <label className="block text-xs text-[#666666] mb-1">Amount to Add (₹)</label>
             <input
               type="number"
               step="0.01"
@@ -450,14 +432,14 @@ function AccountCard({ account, onEdit, onRefresh }: { account: Account; onEdit:
               required
               value={fundAmount}
               onChange={(e) => setFundAmount(e.target.value)}
-              className="w-full px-3 py-2 bg-gray-800 border border-gray-600 rounded-lg text-white focus:outline-none focus:border-blue-500"
+              className="w-full px-3 py-2 bg-white border border-[#e5e5e5] rounded-lg text-[#202020] focus:outline-none focus:border-[#156d95]"
               placeholder="e.g. 5000"
             />
           </div>
-          <button type="submit" className="px-4 py-2 bg-green-500 hover:bg-green-600 text-white rounded-lg font-medium transition-colors">
+          <button type="submit" className="px-4 py-2 bg-green-500 hover:bg-green-600 text-white rounded-lg font-medium transition-colors cursor-pointer">
             Confirm
           </button>
-          <button type="button" onClick={() => setIsAddingFunds(false)} className="px-4 py-2 bg-gray-700 hover:bg-gray-600 text-white rounded-lg font-medium transition-colors">
+          <button type="button" onClick={() => setIsAddingFunds(false)} className="px-4 py-2 bg-[#f5f5f5] hover:bg-[#e5e5e5] text-[#202020] rounded-lg font-medium transition-colors cursor-pointer">
             Cancel
           </button>
         </form>
@@ -545,19 +527,19 @@ function AccountForm({ initialData, onClose, onSuccess }: { initialData: Account
   };
 
   return (
-    <div className="p-6 bg-gray-800/50 border border-gray-700/50 rounded-2xl">
-      <h2 className="text-xl font-bold text-white mb-6">
+    <div className="p-6 bg-gradient-to-br from-[#f8f8f8] to-[#ececec] border border-[#d0d0d0] rounded-2xl shadow-sm">
+      <h2 className="text-xl font-bold text-[#202020] mb-6">
         {isEditing ? "Edit Account" : "Add New Account"}
       </h2>
       
       <form onSubmit={handleSubmit} className="space-y-5">
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
           <div>
-            <label className="block text-sm font-medium text-gray-300 mb-2">Account Type</label>
+            <label className="block text-sm font-medium text-[#202020] mb-2">Account Type</label>
             <select
               value={formData.account_type}
               onChange={(e) => setFormData({ ...formData, account_type: e.target.value })}
-              className="w-full px-4 py-2.5 bg-gray-900 border border-gray-700 rounded-xl text-white focus:outline-none focus:border-blue-500"
+              className="w-full px-4 py-2.5 bg-white border border-[#e5e5e5] rounded-xl text-[#202020] focus:outline-none focus:border-[#156d95]"
               disabled={isEditing} // Cannot change type easily after creation
             >
               <option value="bank">Bank Account</option>
@@ -567,7 +549,7 @@ function AccountForm({ initialData, onClose, onSuccess }: { initialData: Account
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-300 mb-2">
+            <label className="block text-sm font-medium text-[#202020] mb-2">
               {formData.account_type === "cash" ? "Nickname (Optional)" : "Account Name *"}
             </label>
             <input
@@ -580,32 +562,32 @@ function AccountForm({ initialData, onClose, onSuccess }: { initialData: Account
                   ? "e.g. My Cash, Wallet" 
                   : "e.g. HDFC Checking, ICICI Credit"
               }
-              className="w-full px-4 py-2.5 bg-gray-900 border border-gray-700 rounded-xl text-white focus:outline-none focus:border-blue-500"
+              className="w-full px-4 py-2.5 bg-white border border-[#e5e5e5] rounded-xl text-[#202020] focus:outline-none focus:border-[#156d95]"
             />
           </div>
 
           {formData.account_type !== "cash" && (
             <>
               <div>
-                <label className="block text-sm font-medium text-gray-300 mb-2">Institution (Optional)</label>
+                <label className="block text-sm font-medium text-[#202020] mb-2">Institution (Optional)</label>
                 <input
                   type="text"
                   value={formData.institution_name}
                   onChange={(e) => setFormData({ ...formData, institution_name: e.target.value })}
                   placeholder="e.g. HDFC, ICICI, Paytm"
-                  className="w-full px-4 py-2.5 bg-gray-900 border border-gray-700 rounded-xl text-white focus:outline-none focus:border-blue-500"
+                  className="w-full px-4 py-2.5 bg-white border border-[#e5e5e5] rounded-xl text-[#202020] focus:outline-none focus:border-[#156d95]"
                 />
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-300 mb-2">Last 4 Digits (Optional)</label>
+                <label className="block text-sm font-medium text-[#202020] mb-2">Last 4 Digits (Optional)</label>
                 <input
                   type="text"
                   maxLength={4}
                   value={formData.account_number_last4}
                   onChange={(e) => setFormData({ ...formData, account_number_last4: e.target.value.replace(/\D/g, '') })}
                   placeholder="e.g. 1234"
-                  className="w-full px-4 py-2.5 bg-gray-900 border border-gray-700 rounded-xl text-white focus:outline-none focus:border-blue-500"
+                  className="w-full px-4 py-2.5 bg-white border border-[#e5e5e5] rounded-xl text-[#202020] focus:outline-none focus:border-[#156d95]"
                 />
               </div>
             </>
@@ -614,7 +596,7 @@ function AccountForm({ initialData, onClose, onSuccess }: { initialData: Account
 
         {!isEditing && formData.account_type !== "credit" && (
           <div>
-            <label className="block text-sm font-medium text-gray-300 mb-2">
+            <label className="block text-sm font-medium text-[#202020] mb-2">
               {formData.account_type === "cash" ? "Current Cash Amount (₹)" : "Initial Balance / Opening Amount (₹)"}
             </label>
             <input
@@ -624,9 +606,9 @@ function AccountForm({ initialData, onClose, onSuccess }: { initialData: Account
               value={formData.initial_amount}
               onChange={(e) => setFormData({ ...formData, initial_amount: e.target.value })}
               placeholder="e.g. 5000"
-              className="w-full px-4 py-2.5 bg-gray-900 border border-gray-700 rounded-xl text-white focus:outline-none focus:border-blue-500 max-w-sm"
+              className="w-full px-4 py-2.5 bg-white border border-[#e5e5e5] rounded-xl text-[#202020] focus:outline-none focus:border-[#156d95] max-w-sm"
             />
-            <p className="text-xs text-gray-500 mt-2">
+            <p className="text-xs text-[#666666] mt-2">
               {formData.account_type === "cash" 
                 ? "How much cash do you currently have?" 
                 : "Optional. You can also add funds later."}
@@ -634,20 +616,18 @@ function AccountForm({ initialData, onClose, onSuccess }: { initialData: Account
           </div>
         )}
 
-
-
-        <div className="flex gap-4 pt-4 border-t border-gray-700/50">
+        <div className="flex gap-4 pt-4 border-t border-[#e5e5e5]">
           <button
             type="submit"
             disabled={loading}
-            className="px-6 py-2.5 bg-blue-500 hover:bg-blue-600 disabled:opacity-50 text-white rounded-xl font-medium transition-colors"
+            className="px-6 py-2.5 bg-[#156d95] hover:bg-[#146e96] disabled:opacity-50 text-white rounded-xl font-medium transition-colors cursor-pointer"
           >
             {loading ? "Saving..." : isEditing ? "Save Changes" : "Create Account"}
           </button>
           <button
             type="button"
             onClick={onClose}
-            className="px-6 py-2.5 bg-gray-700 hover:bg-gray-600 text-white rounded-xl font-medium transition-colors"
+            className="px-6 py-2.5 bg-[#f5f5f5] hover:bg-[#e5e5e5] text-[#202020] rounded-xl font-medium transition-colors cursor-pointer"
           >
             Cancel
           </button>
@@ -656,4 +636,3 @@ function AccountForm({ initialData, onClose, onSuccess }: { initialData: Account
     </div>
   );
 }
-
