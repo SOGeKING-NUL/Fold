@@ -1,9 +1,14 @@
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8000";
 
-async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
+async function apiFetch<T>(path: string, init?: RequestInit & { token?: string }): Promise<T> {
+  const headers = new Headers(init?.headers);
+  if (init?.token) {
+    headers.set("Authorization", `Bearer ${init.token}`);
+  }
+
   const res = await fetch(`${API_BASE}${path}`, {
-    credentials: "include",
     ...init,
+    headers,
   });
   if (res.status === 401) {
     if (typeof window !== "undefined") {
@@ -34,22 +39,24 @@ export interface BreakdownRow {
   amount_minor: number;
 }
 
-export interface BalanceRow {
-  code: string;
+export interface Account {
+  id: number;
   name: string;
   account_type: string;
-  balance_minor: number;
+  balance: number;
+  institution_name?: string;
+  account_number_last4?: string;
+  is_default?: boolean;
 }
 
 export interface Transaction {
   id: number;
-  transaction_type: string;
+  type: string;
   source: string;
   description: string;
   occurred_at: string;
-  metadata_json: Record<string, unknown>;
-  total_debit_minor: number;
-  total_credit_minor: number;
+  amount: number;
+  category: string;
 }
 
 export interface DailyTrendPoint {
@@ -66,7 +73,7 @@ export interface DashboardData {
   by_category: BreakdownRow[];
   by_payment_method: BreakdownRow[];
   by_account: BreakdownRow[];
-  balances: BalanceRow[];
+  accounts: Account[];
   daily_trend: DailyTrendPoint[];
   recent_transactions: Transaction[];
 }
@@ -77,38 +84,20 @@ export interface TransactionsResponse {
   offset: number;
 }
 
-export async function exchangeToken(token: string) {
-  return apiFetch<{ status: string; user_ref: string }>(
-    `/api/v1/web/auth/exchange?token=${encodeURIComponent(token)}`
-  );
+export async function getMe(token: string) {
+  return apiFetch<AuthMeResponse>("/api/v1/web/auth/me", { token });
 }
 
-export async function login(userRef: string) {
-  return apiFetch<{ status: string; user_ref: string }>("/api/v1/web/auth/login", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ user_ref: userRef }),
-  });
-}
-
-export async function getMe() {
-  return apiFetch<AuthMeResponse>("/api/v1/web/auth/me");
-}
-
-export async function getDashboard(period: "weekly" | "monthly") {
+export async function getDashboard(period: "weekly" | "monthly", token: string) {
   return apiFetch<DashboardData>(
-    `/api/v1/web/dashboard?period=${period}`
+    `/api/v1/web/dashboard?period=${period}`,
+    { token }
   );
 }
 
-export async function getTransactions(limit = 50, offset = 0) {
+export async function getTransactions(limit: number, offset: number, token: string) {
   return apiFetch<TransactionsResponse>(
-    `/api/v1/web/transactions?limit=${limit}&offset=${offset}`
+    `/api/v1/web/transactions?limit=${limit}&offset=${offset}`,
+    { token }
   );
-}
-
-export async function logout() {
-  return apiFetch<{ status: string }>("/api/v1/web/auth/logout", {
-    method: "POST",
-  });
 }

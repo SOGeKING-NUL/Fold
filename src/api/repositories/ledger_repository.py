@@ -1,56 +1,24 @@
-import re
-
+import logging
 from psycopg.rows import dict_row
-from psycopg.types.json import Json
-
 from api.db.connection import get_db_connection
 
+_logger = logging.getLogger(__name__)
 
 class LedgerRepository:
-    def get_or_create_user(self, external_user_ref: str, conn=None) -> dict:
-        owns_conn = conn is None
-        if owns_conn:
-            with get_db_connection() as own_conn:
-                result = self.get_or_create_user(external_user_ref, conn=own_conn)
-                own_conn.commit()
-                return result
-
-        with conn.cursor(row_factory=dict_row) as cur:
-            cur.execute(
-                """
-                INSERT INTO users (external_user_ref)
-                VALUES (%s)
-                ON CONFLICT (external_user_ref) DO UPDATE
-                SET external_user_ref = EXCLUDED.external_user_ref
-                RETURNING *
-                """,
-                (external_user_ref,),
-            )
-            return cur.fetchone()
-
     def get_or_create_account(
         self,
         user_id: int,
-        code: str,
         name: str,
         account_type: str,
         institution_name: str | None = None,
         account_number_last4: str | None = None,
-        is_digital: bool = False,
         conn=None,
     ) -> dict:
         owns_conn = conn is None
         if owns_conn:
             with get_db_connection() as own_conn:
                 result = self.get_or_create_account(
-                    user_id,
-                    code,
-                    name,
-                    account_type,
-                    institution_name=institution_name,
-                    account_number_last4=account_number_last4,
-                    is_digital=is_digital,
-                    conn=own_conn,
+                    user_id, name, account_type, institution_name, account_number_last4, conn=own_conn
                 )
                 own_conn.commit()
                 return result
@@ -58,38 +26,86 @@ class LedgerRepository:
         with conn.cursor(row_factory=dict_row) as cur:
             cur.execute(
                 """
-                INSERT INTO accounts (user_id, code, name, account_type, institution_name, account_number_last4, is_digital)
-                VALUES (%s, %s, %s, %s, %s, %s, %s)
-                ON CONFLICT (user_id, code) DO UPDATE
-                SET name = EXCLUDED.name,
-                    account_type = EXCLUDED.account_type,
+                INSERT INTO accounts (user_id, name, account_type, institution_name, account_number_last4)
+                VALUES (%s, %s, %s, %s, %s)
+                ON CONFLICT (user_id, name) DO UPDATE
+                SET account_type = EXCLUDED.account_type,
                     institution_name = COALESCE(EXCLUDED.institution_name, accounts.institution_name),
-                    account_number_last4 = COALESCE(EXCLUDED.account_number_last4, accounts.account_number_last4),
-                    is_digital = EXCLUDED.is_digital
+                    account_number_last4 = COALESCE(EXCLUDED.account_number_last4, accounts.account_number_last4)
                 RETURNING *
                 """,
-                (user_id, code, name, account_type, institution_name, account_number_last4, is_digital),
+                (user_id, name, account_type, institution_name, account_number_last4),
             )
             return cur.fetchone()
 
-    def get_account_by_code(self, user_id: int, code: str, conn=None) -> dict | None:
+    def get_account_by_id(self, user_id: int, account_id: int) -> dict | None:
+        with get_db_connection() as conn:
+            with conn.cursor(row_factory=dict_row) as cur:
+                cur.execute(
+                    "SELECT * FROM accounts WHERE user_id = %s AND id = %s",
+                    (user_id, account_id)
+                )
+                return cur.fetchone()
+
+    def set_account_as_default(self, user_id: int, account_id: int, conn=None) -> dict:
+        """Set an account as the default for its type."""
         owns_conn = conn is None
         if owns_conn:
             with get_db_connection() as own_conn:
-                return self.get_account_by_code(user_id, code, conn=own_conn)
+                result = self.set_account_as_default(user_id, account_id, conn=own_conn)
+                own_conn.commit()
+                return result
 
         with conn.cursor(row_factory=dict_row) as cur:
+            # Get the account type
             cur.execute(
-                """
-                SELECT *
-                FROM accounts
-                WHERE user_id = %s AND code = %s
-                """,
-                (user_id, code),
+                "SELECT account_type FROM accounts WHERE id = %s AND user_id = %s",
+                (account_id, user_id)
+            )
+            account = cur.fetchone()
+            if not account:
+                raise ValueError("Account not found")
+            
+            # Unset all defaults for this account type
+            cur.execute(
+                "UPDATE accounts SET is_default = FALSE WHERE user_id = %s AND account_type = %s",
+                (user_id, account["account_type"])
+            )
+            
+            # Set this account as default
+            cur.execute(
+                "UPDATE accounts SET is_default = TRUE WHERE id = %s RETURNING *",
+                (account_id,)
             )
             return cur.fetchone()
 
-    def list_accounts(self, external_user_ref: str) -> list[dict]:
+    def get_default_account_for_type(self, user_id: int, account_type: str) -> dict | None:
+        """Get the default account for a specific type."""
+        with get_db_connection() as conn:
+            with conn.cursor(row_factory=dict_row) as cur:
+                cur.execute(
+                    "SELECT * FROM accounts WHERE user_id = %s AND account_type = %s AND is_default = TRUE LIMIT 1",
+                    (user_id, account_type)
+                )
+                return cur.fetchone()
+        with get_db_connection() as conn:
+            with conn.cursor(row_factory=dict_row) as cur:
+                cur.execute(
+                    "SELECT * FROM accounts WHERE user_id = %s AND name = %s",
+                    (user_id, name)
+                )
+                return cur.fetchone()
+
+    def get_account_by_name(self, user_id: int, name: str) -> dict | None:
+        with get_db_connection() as conn:
+            with conn.cursor(row_factory=dict_row) as cur:
+                cur.execute(
+                    "SELECT * FROM accounts WHERE user_id = %s AND name = %s",
+                    (user_id, name)
+                )
+                return cur.fetchone()
+
+    def list_accounts(self, clerk_user_id: str) -> list[dict]:
         with get_db_connection() as conn:
             with conn.cursor(row_factory=dict_row) as cur:
                 cur.execute(
@@ -97,430 +113,191 @@ class LedgerRepository:
                     SELECT a.*
                     FROM users u
                     JOIN accounts a ON a.user_id = u.id
-                    WHERE u.external_user_ref = %s
-                    ORDER BY a.code
+                    WHERE u.clerk_user_id = %s
+                    ORDER BY a.name
                     """,
-                    (external_user_ref,),
+                    (clerk_user_id,),
                 )
                 return cur.fetchall()
 
-    def has_onboarding_account(self, external_user_ref: str) -> bool:
-        with get_db_connection() as conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    """
-                    SELECT EXISTS (
-                        SELECT 1
-                        FROM users u
-                        JOIN accounts a ON a.user_id = u.id
-                        WHERE u.external_user_ref = %s
-                          AND a.account_type IN ('asset', 'liability')
-                          AND a.account_number_last4 IS NOT NULL
-                          AND length(a.account_number_last4) = 4
-                    )
-                    """,
-                    (external_user_ref,),
-                )
-                row = cur.fetchone()
-                return bool(row and row[0])
+    def update_account_balance(self, account_id: int, amount_delta: int, conn=None):
+        """
+        Update account balance with negative balance protection.
+        Raises ValueError if the update would result in a negative balance.
+        """
+        owns_conn = conn is None
+        if owns_conn:
+            with get_db_connection() as own_conn:
+                self.update_account_balance(account_id, amount_delta, conn=own_conn)
+                own_conn.commit()
+                return
 
-    def get_user_preferences(self, external_user_ref: str) -> dict:
-        with get_db_connection() as conn:
-            with conn.cursor(row_factory=dict_row) as cur:
-                cur.execute(
-                    "SELECT preferences_json FROM users WHERE external_user_ref = %s",
-                    (external_user_ref,),
+        with conn.cursor(row_factory=dict_row) as cur:
+            # Check current balance first
+            cur.execute("SELECT balance, name, account_type FROM accounts WHERE id = %s", (account_id,))
+            account = cur.fetchone()
+            if not account:
+                raise ValueError(f"Account {account_id} not found")
+            
+            new_balance = account["balance"] + amount_delta
+            
+            # Prevent negative balance (except for credit cards which can go negative)
+            if new_balance < 0 and account["account_type"] != "credit":
+                current_inr = account["balance"] / 100
+                required_inr = abs(amount_delta) / 100
+                raise ValueError(
+                    f"Insufficient balance in {account['name']}. "
+                    f"Current: ₹{current_inr:,.2f}, Required: ₹{required_inr:,.2f}"
                 )
-                row = cur.fetchone()
-                if not row:
-                    return {}
-                pj = row.get("preferences_json")
-                if pj is None:
-                    return {}
-                return dict(pj) if isinstance(pj, dict) else {}
+            
+            cur.execute(
+                "UPDATE accounts SET balance = balance + %s WHERE id = %s",
+                (amount_delta, account_id)
+            )
 
-    def merge_user_preferences(self, external_user_ref: str, patch: dict) -> None:
-        with get_db_connection() as conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    """
-                    UPDATE users
-                    SET preferences_json = COALESCE(preferences_json, '{}'::jsonb) || %s::jsonb
-                    WHERE external_user_ref = %s
-                    """,
-                    (Json(patch), external_user_ref),
-                )
-            conn.commit()
-
-    def list_real_funding_accounts(self, external_user_ref: str) -> list[dict]:
-        """Asset/liability accounts the user set up with a 4-digit last4 (actual cards/banks)."""
-        with get_db_connection() as conn:
-            with conn.cursor(row_factory=dict_row) as cur:
-                cur.execute(
-                    """
-                    SELECT a.code, a.name, a.account_type
-                    FROM users u
-                    JOIN accounts a ON a.user_id = u.id
-                    WHERE u.external_user_ref = %s
-                      AND a.account_type IN ('asset', 'liability')
-                      AND a.account_number_last4 IS NOT NULL
-                      AND length(trim(a.account_number_last4)) = 4
-                      AND a.is_active = TRUE
-                    ORDER BY a.code
-                    """,
-                    (external_user_ref,),
-                )
-                return list(cur.fetchall())
-
-    def create_or_update_payment_profile(
+    def create_transaction(
         self,
-        *,
-        user_ref: str,
-        profile_type: str,
-        provider: str,
-        profile_name: str,
-        handle_ref: str | None,
-        linked_account_code: str,
+        clerk_user_id: str,
+        amount: int,
+        type: str,
+        category: str,
+        description: str,
+        account_id: int | None,
+        to_account_id: int | None,
+        payment_profile_id: int | None,
+        source: str,
     ) -> dict:
         with get_db_connection() as conn:
-            user = self.get_or_create_user(user_ref, conn=conn)
-            user_id = int(user["id"])
-            linked_account = self.get_account_by_code(user_id=user_id, code=linked_account_code, conn=conn)
-            if not linked_account:
-                raise ValueError(f"Account not found: {linked_account_code}")
-
             with conn.cursor(row_factory=dict_row) as cur:
+                cur.execute("SELECT id FROM users WHERE clerk_user_id = %s", (clerk_user_id,))
+                user = cur.fetchone()
+                if not user:
+                    raise ValueError(f"User not found: {clerk_user_id}")
+                user_id = user["id"]
+
                 cur.execute(
                     """
-                    INSERT INTO payment_profiles (
-                        user_id, profile_type, provider, profile_name, handle_ref, linked_account_id, is_active
+                    INSERT INTO transactions (
+                        user_id, amount, type, category, description, 
+                        account_id, to_account_id, payment_profile_id, source
                     )
-                    VALUES (%s, %s, %s, %s, %s, %s, TRUE)
-                    ON CONFLICT (user_id, profile_type, provider, profile_name) DO UPDATE
-                    SET handle_ref = EXCLUDED.handle_ref,
-                        linked_account_id = EXCLUDED.linked_account_id,
-                        is_active = TRUE
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
                     RETURNING *
                     """,
-                    (user_id, profile_type, provider.lower(), profile_name, handle_ref, int(linked_account["id"])),
+                    (user_id, amount, type, category, description, account_id, to_account_id, payment_profile_id, source)
                 )
-                profile = cur.fetchone()
+                txn = cur.fetchone()
+
+                # Update balances based on type
+                if type == 'expense' and account_id:
+                    self.update_account_balance(account_id, -amount, conn=conn)
+                elif type == 'income' and account_id:
+                    self.update_account_balance(account_id, amount, conn=conn)
+                elif type == 'opening_balance' and account_id:
+                    self.update_account_balance(account_id, amount, conn=conn)
+                elif type == 'transfer' and account_id and to_account_id:
+                    self.update_account_balance(account_id, -amount, conn=conn)
+                    self.update_account_balance(to_account_id, amount, conn=conn)
+
             conn.commit()
-            return profile
+            return txn
 
-    def list_payment_profiles(self, user_ref: str) -> list[dict]:
+    def create_payment_profile(self, clerk_user_id: str, provider: str, profile_name: str, linked_account_id: int) -> dict:
         with get_db_connection() as conn:
             with conn.cursor(row_factory=dict_row) as cur:
+                cur.execute("SELECT id FROM users WHERE clerk_user_id = %s", (clerk_user_id,))
+                user = cur.fetchone()
+                if not user:
+                    raise ValueError("User not found")
+
                 cur.execute(
                     """
-                    SELECT
-                        pp.id,
-                        pp.profile_type,
-                        pp.provider,
-                        pp.profile_name,
-                        pp.handle_ref,
-                        pp.is_active,
-                        a.code AS linked_account_code
-                    FROM users u
-                    JOIN payment_profiles pp ON pp.user_id = u.id
-                    LEFT JOIN accounts a ON a.id = pp.linked_account_id
-                    WHERE u.external_user_ref = %s
-                    ORDER BY pp.provider, pp.profile_name
+                    INSERT INTO payment_profiles (user_id, provider, profile_name, linked_account_id)
+                    VALUES (%s, %s, %s, %s)
+                    ON CONFLICT (user_id, provider, profile_name) DO UPDATE
+                    SET linked_account_id = EXCLUDED.linked_account_id
+                    RETURNING *
                     """,
-                    (user_ref,),
+                    (user["id"], provider.lower(), profile_name, linked_account_id)
                 )
-                return cur.fetchall()
+                row = cur.fetchone()
+            conn.commit()
+            return row
 
-    def resolve_funding_account_by_last4(
-        self,
-        user_ref: str,
-        last4: str,
-        institution_hint: str | None = None,
-    ) -> dict | None:
-        """
-        Match a receipt line like "HDFC Bank 1751" to the user's asset/liability account
-        with the same account_number_last4. If several accounts share last4 (rare), use
-        institution_hint (e.g. "hdfc") against institution_name / account name.
-        """
-        digits = "".join(ch for ch in str(last4) if ch.isdigit())
-        if len(digits) != 4:
-            return None
+    def list_payment_profiles(self, clerk_user_id: str) -> list[dict]:
         with get_db_connection() as conn:
             with conn.cursor(row_factory=dict_row) as cur:
                 cur.execute(
                     """
-                    SELECT a.code, a.account_type, a.institution_name, a.name
-                    FROM users u
-                    JOIN accounts a ON a.user_id = u.id
-                    WHERE u.external_user_ref = %s
-                      AND a.account_type IN ('asset', 'liability')
-                      AND trim(a.account_number_last4) = %s
-                      AND a.is_active = TRUE
-                    """,
-                    (user_ref, digits),
-                )
-                rows = list(cur.fetchall())
-        if not rows:
-            return None
-        if len(rows) == 1:
-            return {"code": rows[0]["code"], "account_type": rows[0]["account_type"]}
-        if not institution_hint:
-            return None
-        hint = institution_hint.lower().strip()
-        if not hint:
-            return None
-
-        def matches(row: dict) -> bool:
-            iname = (row.get("institution_name") or "").lower()
-            aname = (row.get("name") or "").lower()
-            return hint in iname or hint in aname or iname.startswith(hint)
-
-        scored = [r for r in rows if matches(r)]
-        if len(scored) == 1:
-            return {"code": scored[0]["code"], "account_type": scored[0]["account_type"]}
-        return None
-
-    def resolve_funding_account_by_name(self, user_ref: str, name_hint: str) -> dict | None:
-        """
-        Match a bank/institution name (e.g. "slice", "hdfc") to the user's asset/liability
-        account by checking institution_name, account name, and code for a substring match.
-        Returns the single best match, or None if ambiguous / not found.
-        """
-        hint = (name_hint or "").strip().lower()
-        if not hint:
-            return None
-        with get_db_connection() as conn:
-            with conn.cursor(row_factory=dict_row) as cur:
-                cur.execute(
-                    """
-                    SELECT a.code, a.account_type, a.institution_name, a.name
-                    FROM users u
-                    JOIN accounts a ON a.user_id = u.id
-                    WHERE u.external_user_ref = %s
-                      AND a.account_type IN ('asset', 'liability')
-                      AND a.is_active = TRUE
-                    """,
-                    (user_ref,),
-                )
-                rows = list(cur.fetchall())
-        if not rows:
-            return None
-
-        def matches(row: dict) -> bool:
-            iname = (row.get("institution_name") or "").lower()
-            aname = (row.get("name") or "").lower()
-            acode = (row.get("code") or "").lower()
-            return hint in iname or hint in aname or hint in acode
-
-        scored = [r for r in rows if matches(r)]
-        if len(scored) == 1:
-            return {"code": scored[0]["code"], "account_type": scored[0]["account_type"]}
-        return None
-
-    def resolve_linked_account_for_provider(self, user_ref: str, profile_type: str, provider: str) -> dict | None:
-        with get_db_connection() as conn:
-            with conn.cursor(row_factory=dict_row) as cur:
-                cur.execute(
-                    """
-                    SELECT
-                        a.code,
-                        a.account_type,
-                        pp.provider,
-                        pp.profile_name
+                    SELECT pp.*, a.name as linked_account_name
                     FROM users u
                     JOIN payment_profiles pp ON pp.user_id = u.id
                     JOIN accounts a ON a.id = pp.linked_account_id
-                    WHERE u.external_user_ref = %s
-                      AND pp.profile_type = %s
-                      AND pp.provider = %s
-                      AND pp.is_active = TRUE
-                    ORDER BY pp.id DESC
+                    WHERE u.clerk_user_id = %s
+                    ORDER BY pp.provider, pp.profile_name
+                    """,
+                    (clerk_user_id,)
+                )
+                return cur.fetchall()
+
+    def get_payment_profile_by_provider(self, clerk_user_id: str, provider: str) -> dict | None:
+        with get_db_connection() as conn:
+            with conn.cursor(row_factory=dict_row) as cur:
+                cur.execute(
+                    """
+                    SELECT pp.*, a.name as linked_account_name, a.id as linked_account_id
+                    FROM users u
+                    JOIN payment_profiles pp ON pp.user_id = u.id
+                    JOIN accounts a ON a.id = pp.linked_account_id
+                    WHERE u.clerk_user_id = %s AND pp.provider = %s
                     LIMIT 1
                     """,
-                    (user_ref, profile_type, provider.lower()),
+                    (clerk_user_id, provider.lower())
                 )
                 return cur.fetchone()
 
-    def get_account_balance_minor(self, user_ref: str, account_code: str) -> int:
-        """Current balance (in minor units) for one account, using normal debit/credit sign rules."""
+    def get_transactions(self, clerk_user_id: str, limit: int = 50, offset: int = 0) -> list[dict]:
         with get_db_connection() as conn:
             with conn.cursor(row_factory=dict_row) as cur:
                 cur.execute(
                     """
-                    SELECT COALESCE(SUM(
-                        CASE
-                            WHEN a.account_type IN ('asset', 'expense', 'investment')
-                                THEN CASE WHEN le.direction = 'debit' THEN le.amount_minor ELSE -le.amount_minor END
-                            ELSE CASE WHEN le.direction = 'credit' THEN le.amount_minor ELSE -le.amount_minor END
-                        END
-                    ), 0) AS balance_minor
+                    SELECT t.*, a.name as account_name, a2.name as to_account_name, pp.provider as payment_provider
                     FROM users u
-                    JOIN accounts a ON a.user_id = u.id
-                    LEFT JOIN ledger_entries le ON le.account_id = a.id
-                    WHERE u.external_user_ref = %s AND a.code = %s
-                    GROUP BY a.id
-                    """,
-                    (user_ref, account_code),
-                )
-                row = cur.fetchone()
-                return int(row["balance_minor"]) if row else 0
-
-    def create_balanced_journal(
-        self,
-        *,
-        user_ref: str,
-        source: str,
-        external_ref: str | None,
-        transaction_type: str,
-        description: str,
-        occurred_at: str | None,
-        metadata: dict | None,
-        entries: list[dict],
-    ) -> dict:
-        if not entries:
-            raise ValueError("At least one entry is required")
-
-        with get_db_connection() as conn:
-            user = self.get_or_create_user(user_ref, conn=conn)
-            user_id = int(user["id"])
-
-            # Enforce balance before write.
-            debit_total = sum(int(e["amount_minor"]) for e in entries if e["direction"] == "debit")
-            credit_total = sum(int(e["amount_minor"]) for e in entries if e["direction"] == "credit")
-            if debit_total != credit_total:
-                raise ValueError("Journal must be balanced (debits == credits)")
-
-            account_cache: dict[str, dict] = {}
-            with conn.cursor(row_factory=dict_row) as cur:
-                cur.execute(
-                    """
-                    INSERT INTO journal_transactions (
-                        user_id, source, external_ref, transaction_type, description, occurred_at, metadata_json
-                    )
-                    VALUES (
-                        %s, %s, %s, %s, %s, COALESCE(%s::timestamptz, NOW()), %s::jsonb
-                    )
-                    RETURNING *
-                    """,
-                    (user_id, source, external_ref, transaction_type, description, occurred_at, Json(metadata or {})),
-                )
-                journal = cur.fetchone()
-
-                for entry in entries:
-                    code = entry["account_code"]
-                    acct_type = entry["account_type"]
-                    account = account_cache.get(code)
-                    if account is None:
-                        account = self.get_or_create_account(
-                            user_id=user_id,
-                            code=code,
-                            name=code.replace("_", " ").title(),
-                            account_type=acct_type,
-                            conn=conn,
-                        )
-                        account_cache[code] = account
-
-                    cur.execute(
-                        """
-                        INSERT INTO ledger_entries (journal_transaction_id, account_id, direction, amount_minor)
-                        VALUES (%s, %s, %s, %s)
-                        """,
-                        (int(journal["id"]), int(account["id"]), entry["direction"], int(entry["amount_minor"])),
-                    )
-
-            conn.commit()
-            return {
-                "journal": journal,
-                "entries": entries,
-                "debit_total_minor": debit_total,
-                "credit_total_minor": credit_total,
-            }
-
-    def get_balances(self, external_user_ref: str) -> list[dict]:
-        with get_db_connection() as conn:
-            with conn.cursor(row_factory=dict_row) as cur:
-                cur.execute(
-                    """
-                    SELECT
-                        a.code,
-                        a.name,
-                        a.account_type,
-                        COALESCE(SUM(
-                            CASE
-                                WHEN a.account_type IN ('asset', 'expense', 'investment')
-                                    THEN CASE WHEN le.direction = 'debit' THEN le.amount_minor ELSE -le.amount_minor END
-                                ELSE CASE WHEN le.direction = 'credit' THEN le.amount_minor ELSE -le.amount_minor END
-                            END
-                        ), 0) AS balance_minor
-                    FROM users u
-                    JOIN accounts a ON a.user_id = u.id
-                    LEFT JOIN ledger_entries le ON le.account_id = a.id
-                    WHERE u.external_user_ref = %s
-                    GROUP BY a.id
-                    ORDER BY a.code
-                    """,
-                    (external_user_ref,),
-                )
-                return cur.fetchall()
-
-    def get_transactions(self, external_user_ref: str, limit: int = 50, offset: int = 0) -> list[dict]:
-        with get_db_connection() as conn:
-            with conn.cursor(row_factory=dict_row) as cur:
-                cur.execute(
-                    """
-                    SELECT
-                        jt.id,
-                        jt.transaction_type,
-                        jt.source,
-                        jt.external_ref,
-                        jt.description,
-                        jt.occurred_at,
-                        jt.created_at,
-                        jt.metadata_json,
-                        COALESCE(SUM(CASE WHEN le.direction = 'debit' THEN le.amount_minor ELSE 0 END), 0) AS total_debit_minor,
-                        COALESCE(SUM(CASE WHEN le.direction = 'credit' THEN le.amount_minor ELSE 0 END), 0) AS total_credit_minor
-                    FROM users u
-                    JOIN journal_transactions jt ON jt.user_id = u.id
-                    LEFT JOIN ledger_entries le ON le.journal_transaction_id = jt.id
-                    WHERE u.external_user_ref = %s
-                    GROUP BY jt.id
-                    ORDER BY jt.occurred_at DESC, jt.id DESC
+                    JOIN transactions t ON t.user_id = u.id
+                    LEFT JOIN accounts a ON a.id = t.account_id
+                    LEFT JOIN accounts a2 ON a2.id = t.to_account_id
+                    LEFT JOIN payment_profiles pp ON pp.id = t.payment_profile_id
+                    WHERE u.clerk_user_id = %s
+                    ORDER BY t.occurred_at DESC
                     LIMIT %s OFFSET %s
                     """,
-                    (external_user_ref, limit, offset),
+                    (clerk_user_id, limit, offset)
                 )
                 return cur.fetchall()
 
-    def get_report_window_summary(self, external_user_ref: str, days: int) -> dict:
+    def get_report_window_summary(self, clerk_user_id: str, days: int) -> dict:
         with get_db_connection() as conn:
             with conn.cursor(row_factory=dict_row) as cur:
                 cur.execute(
                     """
                     SELECT
-                        COALESCE(SUM(CASE WHEN jt.transaction_type = 'income' THEN le.amount_minor ELSE 0 END), 0) AS income_minor,
-                        COALESCE(SUM(CASE WHEN jt.transaction_type = 'expense' THEN le.amount_minor ELSE 0 END), 0) AS expense_minor,
-                        COALESCE(SUM(CASE WHEN jt.transaction_type = 'investment' THEN le.amount_minor ELSE 0 END), 0) AS investment_minor
+                        COALESCE(SUM(CASE WHEN t.type = 'income' THEN t.amount ELSE 0 END), 0) AS income_minor,
+                        COALESCE(SUM(CASE WHEN t.type = 'expense' THEN t.amount ELSE 0 END), 0) AS expense_minor
                     FROM users u
-                    JOIN journal_transactions jt ON jt.user_id = u.id
-                    JOIN ledger_entries le ON le.journal_transaction_id = jt.id
-                    JOIN accounts a ON a.id = le.account_id
-                    WHERE u.external_user_ref = %s
-                      AND jt.occurred_at >= NOW() - (%s::text || ' days')::interval
-                      AND (
-                        (jt.transaction_type = 'income' AND a.account_type = 'asset' AND le.direction = 'debit') OR
-                        (jt.transaction_type = 'expense' AND a.account_type = 'expense' AND le.direction = 'debit') OR
-                        (jt.transaction_type = 'investment' AND a.account_type = 'investment' AND le.direction = 'debit')
-                      )
+                    JOIN transactions t ON t.user_id = u.id
+                    WHERE u.clerk_user_id = %s
+                      AND t.occurred_at >= NOW() - (%s::text || ' days')::interval
                     """,
-                    (external_user_ref, days),
+                    (clerk_user_id, days),
                 )
-                return cur.fetchone() or {"income_minor": 0, "expense_minor": 0, "investment_minor": 0}
+                res = cur.fetchone()
+                return res or {"income_minor": 0, "expense_minor": 0}
 
-    def get_breakdown(self, external_user_ref: str, days: int, group_by: str) -> list[dict]:
+    def get_breakdown(self, clerk_user_id: str, days: int, group_by: str) -> list[dict]:
         valid_group = {
-            "account": "a.code",
-            "payment_method": "COALESCE(jt.metadata_json->>'payment_method', 'unknown')",
-            "category": "COALESCE(jt.metadata_json->>'category', 'uncategorized')",
+            "account": "a.name",
+            "payment_method": "COALESCE(pp.provider, 'direct')",
+            "category": "COALESCE(t.category, 'uncategorized')",
         }
         if group_by not in valid_group:
             raise ValueError("Invalid group_by")
@@ -529,138 +306,52 @@ class LedgerRepository:
         query = f"""
             SELECT
                 {sql_group_expr} AS key,
-                COALESCE(SUM(le.amount_minor), 0) AS amount_minor
+                COALESCE(SUM(t.amount), 0) AS amount_minor
             FROM users u
-            JOIN journal_transactions jt ON jt.user_id = u.id
-            JOIN ledger_entries le ON le.journal_transaction_id = jt.id
-            JOIN accounts a ON a.id = le.account_id
-            WHERE u.external_user_ref = %s
-              AND jt.occurred_at >= NOW() - (%s::text || ' days')::interval
-              AND jt.transaction_type IN ('expense', 'income', 'investment')
-              AND (
-                (jt.transaction_type = 'income' AND a.account_type = 'asset' AND le.direction = 'debit') OR
-                (jt.transaction_type = 'expense' AND a.account_type = 'expense' AND le.direction = 'debit') OR
-                (jt.transaction_type = 'investment' AND a.account_type = 'investment' AND le.direction = 'debit')
-              )
+            JOIN transactions t ON t.user_id = u.id
+            LEFT JOIN accounts a ON a.id = t.account_id
+            LEFT JOIN payment_profiles pp ON pp.id = t.payment_profile_id
+            WHERE u.clerk_user_id = %s
+              AND t.occurred_at >= NOW() - (%s::text || ' days')::interval
+              AND t.type = 'expense'
             GROUP BY key
             ORDER BY amount_minor DESC
         """
         with get_db_connection() as conn:
             with conn.cursor(row_factory=dict_row) as cur:
-                cur.execute(query, (external_user_ref, days))
+                cur.execute(query, (clerk_user_id, days))
                 return cur.fetchall()
 
-    def get_daily_trend(self, external_user_ref: str, days: int) -> list[dict]:
+    def insert_journal_media(self, transaction_id: int, media_kind: str, mime_type: str | None, file_bytes: bytes) -> dict:
         with get_db_connection() as conn:
             with conn.cursor(row_factory=dict_row) as cur:
                 cur.execute(
                     """
-                    SELECT
-                        d.day::date AS day,
-                        COALESCE(SUM(CASE WHEN jt.transaction_type = 'expense' THEN le.amount_minor ELSE 0 END), 0) AS expense_minor,
-                        COALESCE(SUM(CASE WHEN jt.transaction_type = 'income'  THEN le.amount_minor ELSE 0 END), 0) AS income_minor
-                    FROM generate_series(
-                        (NOW() - (%s::text || ' days')::interval)::date,
-                        NOW()::date,
-                        '1 day'::interval
-                    ) AS d(day)
-                    LEFT JOIN users u ON u.external_user_ref = %s
-                    LEFT JOIN journal_transactions jt
-                        ON jt.user_id = u.id
-                        AND jt.occurred_at::date = d.day::date
-                        AND jt.transaction_type IN ('expense', 'income')
-                    LEFT JOIN ledger_entries le
-                        ON le.journal_transaction_id = jt.id
-                        AND (
-                            (jt.transaction_type = 'income'  AND le.direction = 'debit') OR
-                            (jt.transaction_type = 'expense' AND le.direction = 'debit')
-                        )
-                    LEFT JOIN accounts a
-                        ON a.id = le.account_id
-                        AND (
-                            (jt.transaction_type = 'income'  AND a.account_type = 'asset') OR
-                            (jt.transaction_type = 'expense' AND a.account_type = 'expense')
-                        )
-                    GROUP BY d.day
-                    ORDER BY d.day
-                    """,
-                    (days, external_user_ref),
-                )
-                return cur.fetchall()
-
-    def insert_journal_media(
-        self,
-        journal_transaction_id: int,
-        media_kind: str,
-        mime_type: str | None,
-        file_bytes: bytes,
-    ) -> dict:
-        if media_kind not in ("image", "audio"):
-            raise ValueError("media_kind must be image or audio")
-        with get_db_connection() as conn:
-            with conn.cursor(row_factory=dict_row) as cur:
-                cur.execute(
-                    """
-                    INSERT INTO journal_media (journal_transaction_id, media_kind, mime_type, file_bytes)
+                    INSERT INTO journal_media (transaction_id, media_kind, mime_type, file_bytes)
                     VALUES (%s, %s, %s, %s)
-                    RETURNING id, journal_transaction_id, media_kind, mime_type, created_at
+                    RETURNING *
                     """,
-                    (journal_transaction_id, media_kind, mime_type, file_bytes),
+                    (transaction_id, media_kind, mime_type, file_bytes)
                 )
                 row = cur.fetchone()
             conn.commit()
             return dict(row)
 
-    def reassign_expense_journal_category(
-        self, *, user_ref: str, journal_transaction_id: int, new_category: str
-    ) -> dict:
-        """
-        Update the category stored in metadata_json for an expense journal.
-        Ledger entries stay on the pooled expense_operating account; only the tag changes.
-        """
-        valid = frozenset(
-            {
-                "education",
-                "emi",
-                "entertainment",
-                "food",
-                "healthcare",
-                "investment",
-                "shopping",
-                "travel",
-                "utilities",
-                "misc",
-                "friends",
-            }
-        )
-        cat = new_category.lower().strip()
-        if cat not in valid:
-            raise ValueError(f"Invalid category '{new_category}'.")
-
+    def reassign_expense_category(self, user_ref: str, transaction_id: int, new_category: str) -> dict:
         with get_db_connection() as conn:
             with conn.cursor(row_factory=dict_row) as cur:
                 cur.execute(
                     """
-                    SELECT jt.id, jt.transaction_type
-                    FROM journal_transactions jt
-                    JOIN users u ON u.id = jt.user_id
-                    WHERE u.external_user_ref = %s AND jt.id = %s
+                    UPDATE transactions t
+                    SET category = %s
+                    FROM users u
+                    WHERE u.id = t.user_id AND u.clerk_user_id = %s AND t.id = %s
+                    RETURNING t.id, t.category
                     """,
-                    (user_ref, journal_transaction_id),
+                    (new_category, user_ref, transaction_id)
                 )
-                jt = cur.fetchone()
-                if not jt:
-                    raise ValueError("Journal not found.")
-                if jt["transaction_type"] != "expense":
-                    raise ValueError("Only expense journals can be recategorized this way.")
-
-                cur.execute(
-                    """
-                    UPDATE journal_transactions
-                    SET metadata_json = COALESCE(metadata_json, '{}'::jsonb) || %s::jsonb
-                    WHERE id = %s
-                    """,
-                    (Json({"category": cat, "category_user_corrected": True}), journal_transaction_id),
-                )
+                row = cur.fetchone()
             conn.commit()
-        return {"journal_id": journal_transaction_id, "category": cat}
+            if not row:
+                raise ValueError("Transaction not found")
+            return dict(row)

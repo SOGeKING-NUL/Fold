@@ -6,7 +6,6 @@ from api.schemas import (
     LedgerBalanceResponse,
     PrimaryFundingRequest,
     LedgerIncomeRequest,
-    LedgerInvestmentRequest,
     LedgerOpeningBalanceRequest,
     LedgerPostRequest,
     LedgerPostResponse,
@@ -21,7 +20,6 @@ from api.services.ledger_service import (
     AccountUpsertRequest as ServiceAccountUpsertRequest,
     ExpenseRequest,
     IncomeRequest,
-    InvestmentRequest,
     OpeningBalanceRequest,
     PaymentProfileUpsertRequest as ServicePaymentProfileUpsertRequest,
     TransferRequest,
@@ -39,16 +37,16 @@ async def post_expense(request: LedgerPostRequest):
                 user_ref=request.user_ref,
                 source=request.source,
                 description=request.description,
-                expense_account_code=request.expense_account_code,
-                funding_account_code=request.funding_account_code,
-                funding_account_type=request.funding_account_type,
+                funding_account_name=request.funding_account_name,
                 amount=request.amount,
                 external_ref=request.external_ref,
+                occurred_at=request.occurred_at,
                 category=request.category,
                 payment_method=request.payment_method,
                 payment_provider=request.payment_provider,
                 receipt_account_last4=request.receipt_account_last4,
                 receipt_institution_hint=request.receipt_institution_hint,
+                bank_hint=request.bank_hint,
             )
         )
     except ValueError as exc:
@@ -58,36 +56,14 @@ async def post_expense(request: LedgerPostRequest):
 
 @router.post("/income", response_model=LedgerPostResponse)
 async def post_income(request: LedgerIncomeRequest):
-    result = ledger_service.post_income(
-        IncomeRequest(
-            user_ref=request.user_ref,
-            source=request.source,
-            description=request.description,
-            amount=request.amount,
-            income_account_code=request.income_account_code,
-            destination_account_code=request.destination_account_code,
-            destination_account_type=request.destination_account_type,
-            external_ref=request.external_ref,
-            occurred_at=request.occurred_at,
-            category=request.category,
-            payment_method=request.payment_method,
-        )
-    )
-    return LedgerPostResponse(result=result)
-
-
-@router.post("/investment", response_model=LedgerPostResponse)
-async def post_investment(request: LedgerInvestmentRequest):
     try:
-        result = ledger_service.post_investment(
-            InvestmentRequest(
+        result = ledger_service.post_income(
+            IncomeRequest(
                 user_ref=request.user_ref,
                 source=request.source,
                 description=request.description,
                 amount=request.amount,
-                investment_account_code=request.investment_account_code,
-                funding_account_code=request.funding_account_code,
-                funding_account_type=request.funding_account_type,
+                destination_account_name=request.destination_account_name,
                 external_ref=request.external_ref,
                 occurred_at=request.occurred_at,
                 category=request.category,
@@ -101,54 +77,66 @@ async def post_investment(request: LedgerInvestmentRequest):
 
 @router.post("/transfer", response_model=LedgerPostResponse)
 async def post_transfer(request: LedgerTransferRequest):
-    result = ledger_service.post_transfer(
-        TransferRequest(
-            user_ref=request.user_ref,
-            source=request.source,
-            description=request.description,
-            amount=request.amount,
-            from_account_code=request.from_account_code,
-            from_account_type=request.from_account_type,
-            to_account_code=request.to_account_code,
-            to_account_type=request.to_account_type,
-            external_ref=request.external_ref,
-            occurred_at=request.occurred_at,
+    try:
+        result = ledger_service.post_transfer(
+            TransferRequest(
+                user_ref=request.user_ref,
+                source=request.source,
+                description=request.description,
+                amount=request.amount,
+                from_account_name=request.from_account_name,
+                to_account_name=request.to_account_name,
+                external_ref=request.external_ref,
+                occurred_at=request.occurred_at,
+            )
         )
-    )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     return LedgerPostResponse(result=result)
 
 
 @router.post("/opening-balance", response_model=LedgerPostResponse)
 async def post_opening_balance(request: LedgerOpeningBalanceRequest):
-    result = ledger_service.post_opening_balance(
-        OpeningBalanceRequest(
-            user_ref=request.user_ref,
-            source=request.source,
-            account_code=request.account_code,
-            account_type=request.account_type,
-            amount=request.amount,
-            opening_equity_code=request.opening_equity_code,
-            external_ref=request.external_ref,
-            occurred_at=request.occurred_at,
+    try:
+        result = ledger_service.post_opening_balance(
+            OpeningBalanceRequest(
+                user_ref=request.user_ref,
+                source=request.source,
+                account_name=request.account_name,
+                amount=request.amount,
+                external_ref=request.external_ref,
+                occurred_at=request.occurred_at,
+            )
         )
-    )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     return LedgerPostResponse(result=result)
 
 
 @router.post("/accounts", response_model=LedgerPostResponse)
 async def upsert_account(request: AccountUpsertRequest):
-    result = ledger_service.upsert_account(
-        ServiceAccountUpsertRequest(
-            user_ref=request.user_ref,
-            code=request.code,
-            name=request.name,
-            account_type=request.account_type,
-            currency=request.currency,
-            institution_name=request.institution_name,
-            account_number_last4=request.account_number_last4,
-            is_digital=request.is_digital,
+    try:
+        result = ledger_service.upsert_account(
+            ServiceAccountUpsertRequest(
+                user_ref=request.user_ref,
+                name=request.name,
+                account_type=request.account_type,
+                institution_name=request.institution_name,
+                account_number_last4=request.account_number_last4,
+            )
         )
-    )
+        # If opening balance is provided, record it as a transaction
+        if request.opening_balance and request.opening_balance > 0:
+            ledger_service.post_opening_balance(
+                OpeningBalanceRequest(
+                    user_ref=request.user_ref,
+                    source="account_creation",
+                    account_name=request.name,
+                    amount=request.opening_balance,
+                )
+            )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     return LedgerPostResponse(result=result)
 
 
@@ -162,8 +150,18 @@ async def list_accounts(user_ref: str):
 async def set_primary_funding(request: PrimaryFundingRequest):
     try:
         result = ledger_service.set_primary_funding_account(
-            request.user_ref, request.account_code, request.account_type
+            request.user_ref, request.account_name
         )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return LedgerPostResponse(result=result)
+
+
+@router.post("/accounts/{user_ref}/set-default", response_model=LedgerPostResponse)
+async def set_default_account(user_ref: str, account_name: str = Query(...)):
+    """Set an account as the default for its type (cash/bank/credit)."""
+    try:
+        result = ledger_service.set_default_account(user_ref, account_name)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return LedgerPostResponse(result=result)
@@ -171,16 +169,17 @@ async def set_primary_funding(request: PrimaryFundingRequest):
 
 @router.post("/payment-profiles", response_model=LedgerPostResponse)
 async def upsert_payment_profile(request: PaymentProfileUpsertRequest):
-    result = ledger_service.upsert_payment_profile(
-        ServicePaymentProfileUpsertRequest(
-            user_ref=request.user_ref,
-            profile_type=request.profile_type,
-            provider=request.provider,
-            profile_name=request.profile_name,
-            linked_account_code=request.linked_account_code,
-            handle_ref=request.handle_ref,
+    try:
+        result = ledger_service.upsert_payment_profile(
+            ServicePaymentProfileUpsertRequest(
+                user_ref=request.user_ref,
+                provider=request.provider,
+                profile_name=request.profile_name,
+                linked_account_name=request.linked_account_name,
+            )
         )
-    )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     return LedgerPostResponse(result=result)
 
 
@@ -188,18 +187,6 @@ async def upsert_payment_profile(request: PaymentProfileUpsertRequest):
 async def list_payment_profiles(user_ref: str):
     profiles = ledger_service.list_payment_profiles(user_ref)
     return PaymentProfileListResponse(user_ref=user_ref, profiles=profiles)
-
-
-@router.get("/onboarding-status/{user_ref}", response_model=LedgerReportResponse)
-async def get_onboarding_status(user_ref: str):
-    report = ledger_service.get_onboarding_status(user_ref)
-    return LedgerReportResponse(user_ref=user_ref, report=report)
-
-
-@router.get("/balances/{user_ref}", response_model=LedgerBalanceResponse)
-async def get_balances(user_ref: str):
-    balances = ledger_service.get_balances(user_ref)
-    return LedgerBalanceResponse(user_ref=user_ref, balances=balances)
 
 
 @router.get("/reports/weekly/{user_ref}", response_model=LedgerReportResponse)
@@ -214,19 +201,15 @@ async def get_monthly_report(user_ref: str):
     return LedgerReportResponse(user_ref=user_ref, report=report)
 
 
-@router.get("/reports/cashflow/{user_ref}", response_model=LedgerReportResponse)
-async def get_cashflow_report(user_ref: str, period: str = Query(default="month", pattern="^(week|month)$")):
-    report = ledger_service.get_cashflow_report(user_ref, period=period)
-    return LedgerReportResponse(user_ref=user_ref, report=report)
-
-
 @router.get("/reports/breakdown/{user_ref}", response_model=LedgerReportResponse)
 async def get_breakdown_report(
     user_ref: str,
     period: str = Query(default="month", pattern="^(week|month)$"),
     group_by: str = Query(default="account", pattern="^(account|payment_method|category)$"),
 ):
-    report = ledger_service.get_breakdown(user_ref=user_ref, period=period, group_by=group_by)
+    days = 7 if period == "week" else 30
+    rows = ledger_service.repository.get_breakdown(user_ref, days=days, group_by=group_by)
+    report = {"period": period, "group_by": group_by, "rows": rows}
     return LedgerReportResponse(user_ref=user_ref, report=report)
 
 
