@@ -1,131 +1,125 @@
 """
 Web Dashboard API Controller
 ==============================
-Session-gated endpoints that the Next.js frontend calls.
+Clerk-authenticated endpoints that the Next.js frontend calls.
 All routes live under /api/v1/web/.
+
+Auth flow (simple):
+  1. Frontend signs in via Clerk (handled entirely by @clerk/nextjs).
+  2. Frontend calls our API with: Authorization: Bearer <clerk-jwt>
+  3. We verify the JWT, find-or-create the user in our DB, and proceed.
+
+That's it — one auth system, no cookies, no magic links.
 """
 
+import logging
 from datetime import datetime
-from fastapi import APIRouter, HTTPException, Query, Request, Response
-from pydantic import BaseModel
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
-from api.services.web_auth_service import (
-    create_session,
-    exchange_token,
-    validate_session,
-    destroy_session,
-)
+from api.middleware.clerk_auth import clerk_auth
+from api.repositories.user_repository import UserRepository
 from api.services.ledger_service import LedgerService
 
+_logger = logging.getLogger(__name__)
+
 router = APIRouter(prefix="/api/v1/web", tags=["web-dashboard"])
+
+user_repo = UserRepository()
 ledger_service = LedgerService()
 
-SESSION_COOKIE = "fold_session"
-COOKIE_MAX_AGE = 86400 * 7
 
+# ── Shared auth dependency ─────────────────────────────────────────────
+# Every endpoint below uses this. It:
+#   1. Reads the Authorization header
+#   2. Verifies the Clerk JWT
+#   3. Creates the user in our DB if they don't exist yet
+#   4. Returns a dict with user_ref and clerk_user_id
 
-class LoginRequest(BaseModel):
-    user_ref: str
+async def get_current_user(request: Request) -> dict:
+    """
+    Dependency: verify the Clerk JWT and return user info.
 
-
-def _require_session(request: Request) -> dict:
-    sid = request.cookies.get(SESSION_COOKIE)
-    if not sid:
+    Returns:
+        {
+            "user_ref": "user_2abc...",    # our DB identifier
+            "clerk_user_id": "user_2abc...",
+            "email": "...",
+            "full_name": "...",
+        }
+    """
+    # Step 1: Verify the Clerk JWT from the Authorization header
+    user_info = await clerk_auth.get_current_user(request)
+    if not user_info:
         raise HTTPException(status_code=401, detail="Not authenticated")
-    session = validate_session(sid)
-    if session is None:
-        raise HTTPException(status_code=401, detail="Session expired")
-    return session
 
-
-@router.get("/auth/exchange")
-async def auth_exchange(token: str, response: Response):
-    """Exchange a one-time magic-link token for a session cookie."""
-    result = exchange_token(token)
-    if result is None:
-        raise HTTPException(status_code=401, detail="Invalid or expired token")
-    response.set_cookie(
-        key=SESSION_COOKIE,
-        value=result["session_id"],
-        httponly=True,
-        samesite="lax",
-        max_age=COOKIE_MAX_AGE,
-        secure=False,
+    # Step 2: Find or create the user in our database
+    user = user_repo.get_or_create_user_from_clerk(
+        clerk_user_id=user_info["clerk_user_id"],
+        email=user_info.get("email"),
+        full_name=user_info.get("full_name"),
+        avatar_url=user_info.get("avatar_url"),
     )
-    return {"status": "ok", "user_ref": result["user_ref"]}
 
+    return {
+        "user_ref": user_info["clerk_user_id"],
+        "clerk_user_id": user_info["clerk_user_id"],
+        "email": user.get("email"),
+        "full_name": user.get("full_name"),
+    }
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# Auth Endpoints
+# ═══════════════════════════════════════════════════════════════════════
 
 @router.get("/auth/me")
-async def auth_me(request: Request):
-    """Return the current session's user info."""
-    session = _require_session(request)
-    return {"user_ref": session["user_ref"]}
+async def auth_me(user: dict = Depends(get_current_user)):
+    """
+    Return the current user's info.
+
+    The frontend calls this on page load to get the user_ref
+    needed for other API calls (accounts, transactions, etc.).
+    """
+    return {
+        "user_ref": user["user_ref"],
+        "email": user.get("email"),
+        "full_name": user.get("full_name"),
+    }
 
 
-@router.post("/auth/login")
-async def auth_login(payload: LoginRequest, response: Response):
-    """Direct web login with a user reference."""
-    try:
-        result = create_session(payload.user_ref)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    response.set_cookie(
-        key=SESSION_COOKIE,
-        value=result["session_id"],
-        httponly=True,
-        samesite="lax",
-        max_age=COOKIE_MAX_AGE,
-        secure=False,
-    )
-    return {"status": "ok", "user_ref": result["user_ref"]}
-
-
-@router.post("/auth/logout")
-async def auth_logout(request: Request, response: Response):
-    sid = request.cookies.get(SESSION_COOKIE)
-    if sid:
-        destroy_session(sid)
-    response.delete_cookie(SESSION_COOKIE)
-    return {"status": "ok"}
-
+# ═══════════════════════════════════════════════════════════════════════
+# Dashboard
+# ═══════════════════════════════════════════════════════════════════════
 
 @router.get("/dashboard")
 async def get_dashboard(
-    request: Request,
+    user: dict = Depends(get_current_user),
     period: str = Query(default="monthly", pattern="^(weekly|monthly)$"),
 ):
     """
     Single composite endpoint for the reports dashboard.
-    Returns summary totals, breakdowns, balances, and recent transactions
-    all using the same period window.
+    Returns summary totals, breakdowns, balances, and recent transactions.
     """
-    session = _require_session(request)
-    user_ref = session["user_ref"]
+    user_ref = user["user_ref"]
 
     now = datetime.utcnow()
-    if period == "weekly":
-        days = 7
-    else:
-        days = max(1, now.day)
+    days = 7 if period == "weekly" else max(1, now.day)
 
     summary = ledger_service.repository.get_report_window_summary(user_ref, days=days)
     income = int(summary["income_minor"])
     expense = int(summary["expense_minor"])
-    investment = int(summary["investment_minor"])
-    net = income - expense - investment
+    net = income - expense
 
     by_category = ledger_service.repository.get_breakdown(user_ref, days=days, group_by="category")
     by_payment_method = ledger_service.repository.get_breakdown(user_ref, days=days, group_by="payment_method")
     by_account = ledger_service.repository.get_breakdown(user_ref, days=days, group_by="account")
 
-    balances = ledger_service.get_cash_snapshot(user_ref)
+    accounts = ledger_service.list_accounts(user_ref)
     tx_result = ledger_service.get_transactions(user_ref, limit=20, offset=0)
     transactions = tx_result.get("rows", []) if isinstance(tx_result, dict) else tx_result
 
-    daily_trend = ledger_service.repository.get_daily_trend(user_ref, days=days)
-
     period_label = (
-        f"Last 7 days"
+        "Last 7 days"
         if period == "weekly"
         else f"{now.strftime('%B %Y')} (month to date)"
     )
@@ -137,36 +131,41 @@ async def get_dashboard(
         "summary": {
             "income_minor": income,
             "expense_minor": expense,
-            "investment_minor": investment,
+            "investment_minor": 0,
             "net_cashflow_minor": net,
         },
         "by_category": [dict(r) for r in by_category],
         "by_payment_method": [dict(r) for r in by_payment_method],
         "by_account": [dict(r) for r in by_account],
-        "balances": [dict(r) for r in balances],
-        "daily_trend": [_serialize_transaction(t) for t in daily_trend],
-        "recent_transactions": [_serialize_transaction(t) for t in transactions],
+        "accounts": [dict(r) for r in accounts],
+        "daily_trend": [],
+        "recent_transactions": [_serialize(t) for t in transactions],
     }
 
 
+# ═══════════════════════════════════════════════════════════════════════
+# Transactions
+# ═══════════════════════════════════════════════════════════════════════
+
 @router.get("/transactions")
 async def get_transactions(
-    request: Request,
+    user: dict = Depends(get_current_user),
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
 ):
-    session = _require_session(request)
-    user_ref = session["user_ref"]
+    user_ref = user["user_ref"]
     tx_result = ledger_service.get_transactions(user_ref, limit=limit, offset=offset)
     rows = tx_result.get("rows", []) if isinstance(tx_result, dict) else tx_result
     return {
-        "transactions": [_serialize_transaction(t) for t in rows],
+        "transactions": [_serialize(t) for t in rows],
         "limit": limit,
         "offset": offset,
     }
 
 
-def _serialize_transaction(t: dict) -> dict:
+# ── Helper ─────────────────────────────────────────────────────────────
+
+def _serialize(t: dict) -> dict:
     """Ensure all values are JSON-serializable."""
     out = {}
     for k, v in t.items():

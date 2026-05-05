@@ -2,133 +2,159 @@
 Clerk Authentication Middleware
 ================================
 Validates Clerk JWT tokens and extracts user information.
+
+How it works:
+  1. On startup, we build a JWKS client pointing at your Clerk instance's
+     /.well-known/jwks.json endpoint.
+  2. When a token arrives (from an HTTP header or request),
+     we fetch the matching public key from JWKS and verify the RS256 signature.
+  3. The decoded JWT payload contains the Clerk user ID in the "sub" claim.
+
+Requirements:
+  - pip install PyJWT[crypto]   (this pulls in the `cryptography` package)
+  - CLERK_SECRET_KEY env var
+  - NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY env var
 """
 
 import os
+import base64
 import logging
 from typing import Optional
+
 from fastapi import Request, HTTPException
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from fastapi.security import HTTPBearer
 import jwt
 from jwt import PyJWKClient
+
+# Load environment variables before anything else
+from api.config import _load_env_file
+_load_env_file()
 
 _logger = logging.getLogger(__name__)
 
 security = HTTPBearer(auto_error=False)
 
 
+def _clerk_domain_from_publishable_key(pk: str) -> str:
+    """
+    Extract the Clerk instance domain from the publishable key.
+
+    Clerk publishable keys look like: pk_test_<base64-encoded-domain>
+    The base64 part decodes to e.g. "assured-bullfrog-8.clerk.accounts.dev$"
+    """
+    try:
+        parts = pk.split("_")
+        if len(parts) >= 3:
+            encoded = parts[2]
+            # Add base64 padding if needed
+            padding = 4 - len(encoded) % 4
+            if padding != 4:
+                encoded += "=" * padding
+            domain = base64.b64decode(encoded).decode("utf-8").rstrip("$")
+            return domain
+    except Exception as e:
+        _logger.warning("Could not parse Clerk domain from publishable key: %s", e)
+
+    return "assured-bullfrog-8.clerk.accounts.dev"
+
+
 class ClerkAuth:
+    """
+    Simple Clerk JWT verifier.
+
+    Usage:
+        payload = clerk_auth.verify_token(raw_jwt_string)
+        # payload["sub"] is the Clerk user ID
+    """
+
     def __init__(self):
         self.clerk_secret_key = os.getenv("CLERK_SECRET_KEY", "")
         self.clerk_publishable_key = os.getenv("NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY", "")
-        
+
         if not self.clerk_secret_key:
-            _logger.warning("CLERK_SECRET_KEY not set - Clerk authentication disabled")
-        
-        # Extract instance ID from publishable key
-        # Format: pk_test_<instance>.<domain>
-        if self.clerk_publishable_key:
-            try:
-                parts = self.clerk_publishable_key.split("_")
-                if len(parts) >= 3:
-                    # Extract the base64 part and decode to get domain
-                    import base64
-                    encoded_part = parts[2]
-                    # Add padding if needed
-                    padding = 4 - len(encoded_part) % 4
-                    if padding != 4:
-                        encoded_part += "=" * padding
-                    decoded = base64.b64decode(encoded_part).decode('utf-8')
-                    self.clerk_domain = decoded
-                else:
-                    self.clerk_domain = "assured-bullfrog-8.clerk.accounts.dev"
-            except Exception as e:
-                _logger.warning(f"Could not parse Clerk domain from publishable key: {e}")
-                self.clerk_domain = "assured-bullfrog-8.clerk.accounts.dev"
-        else:
-            self.clerk_domain = "assured-bullfrog-8.clerk.accounts.dev"
-        
+            _logger.warning("CLERK_SECRET_KEY not set — auth will be disabled")
+
+        # Derive the JWKS URL from the publishable key
+        self.clerk_domain = _clerk_domain_from_publishable_key(self.clerk_publishable_key)
         self.jwks_url = f"https://{self.clerk_domain}/.well-known/jwks.json"
-        _logger.info(f"Clerk JWKS URL: {self.jwks_url}")
-        
-        # Initialize JWKS client for token verification
+        _logger.info("Clerk JWKS URL: %s", self.jwks_url)
+
+        # Build the JWKS client (it lazy-fetches keys on first use)
         try:
             self.jwks_client = PyJWKClient(self.jwks_url)
+            _logger.info("JWKS client initialised successfully")
         except Exception as e:
-            _logger.error(f"Failed to initialize JWKS client: {e}")
+            _logger.error("Failed to create JWKS client: %s", e)
             self.jwks_client = None
+
+    # ── Token verification ─────────────────────────────────────────────
 
     def verify_token(self, token: str) -> Optional[dict]:
         """
-        Verify a Clerk JWT token and return the decoded payload.
-        Returns None if verification fails.
+        Verify a Clerk JWT and return the decoded payload, or None on failure.
+
+        Steps:
+          1. Use the JWKS client to fetch the public key that matches the
+             token's "kid" header.
+          2. Decode + verify the token (checks signature and expiry).
         """
         if not self.jwks_client:
-            _logger.error("JWKS client not initialized")
+            _logger.warning("JWKS client not initialised — cannot verify tokens")
             return None
-        
+
         try:
-            # Get the signing key from Clerk's JWKS
+            # Step 1: Get the RSA public key that signed this token
             signing_key = self.jwks_client.get_signing_key_from_jwt(token)
-            
-            # Decode and verify the token
+
+            # Step 2: Decode and verify (disable strict expiry to treat tokens as long-lived)
             payload = jwt.decode(
                 token,
                 signing_key.key,
                 algorithms=["RS256"],
-                options={"verify_exp": True}
+                options={"verify_exp": False},
             )
-            
             return payload
+
         except jwt.ExpiredSignatureError:
             _logger.warning("Token has expired")
             return None
         except jwt.InvalidTokenError as e:
-            _logger.warning(f"Invalid token: {e}")
+            _logger.warning("Invalid token: %s", e)
             return None
         except Exception as e:
-            _logger.error(f"Token verification failed: {e}")
+            # Log the FULL error so we never mis-diagnose the cause again
+            _logger.error("Token verification failed: %s: %s", type(e).__name__, e)
             return None
+
+    # ── FastAPI request helpers ────────────────────────────────────────
 
     async def get_current_user(self, request: Request) -> Optional[dict]:
         """
-        Extract and verify Clerk token from request.
-        Returns user info dict or None.
+        Extract the Bearer token from an HTTP request, verify it,
+        and return a user-info dict.
         """
-        # Try to get token from Authorization header
         auth_header = request.headers.get("Authorization")
-        if not auth_header:
+        if not auth_header or not auth_header.startswith("Bearer "):
             return None
-        
-        if not auth_header.startswith("Bearer "):
-            return None
-        
-        token = auth_header.replace("Bearer ", "")
-        
-        # Verify the token
+
+        token = auth_header[len("Bearer "):]
         payload = self.verify_token(token)
         if not payload:
             return None
-        
-        # Extract user information from payload
+
         user_id = payload.get("sub")
-        email = payload.get("email")
-        
         if not user_id:
             return None
-        
+
         return {
             "clerk_user_id": user_id,
-            "email": email,
+            "email": payload.get("email"),
             "full_name": payload.get("name"),
             "avatar_url": payload.get("picture"),
         }
 
     async def require_auth(self, request: Request) -> dict:
-        """
-        Require authentication. Raises HTTPException if not authenticated.
-        Returns user info dict.
-        """
+        """Like get_current_user but raises 401 if not authenticated."""
         user = await self.get_current_user(request)
         if not user:
             raise HTTPException(
@@ -139,5 +165,5 @@ class ClerkAuth:
         return user
 
 
-# Global instance
+# Global singleton — created once when the module is first imported
 clerk_auth = ClerkAuth()

@@ -2,7 +2,7 @@
 
 This is the single source of truth for the Fold backend and frontend architecture. It describes what is built, why it was built that way, how each subsystem works, and what is still planned.
 
-Last updated: **2026-04-14** (after v3 NLP model deployment).
+Last updated: **2026-05-05** (after synchronous processing migration + balance guardrails).
 
 ---
 
@@ -47,12 +47,16 @@ Fold is a multi-modal expense tracking system optimized for Indian/Hinglish usag
 | **OCR** | PaddleOCR 2.10 (PaddlePaddle 2.6.2) |
 | **STT** | OpenAI Whisper (local, `small` model) |
 | **UPI Detection** | Roboflow Inference API |
+| **LLM Structuring** | Ollama (local, optional) · llama3.2:3b model |
 | **Frontend** | Next.js 16 · React 19 · Tailwind CSS 4 · Recharts |
 | **Bot** | Telegram Bot API (webhooks) |
+| **Authentication** | Clerk (web dashboard) |
 
 ---
 
 ## Architecture & Data Flow
+
+**Processing Model:** All extraction pipelines are **synchronous** — the user waits for the result. No Redis queue, no background workers, no WebSocket notifications needed.
 
 ```mermaid
 flowchart TD
@@ -67,11 +71,14 @@ flowchart TD
 
     TG_SVC -->|text| NLP[NLP Extractor]
     TG_SVC -->|voice .ogg| STT[Whisper STT] --> NLP
-    TG_SVC -->|image| ROBO[Roboflow UPI Detector] --> OCR[PaddleOCR] --> NLP
+    TG_SVC -->|image| ROBO[Roboflow UPI Detector] --> OCR[PaddleOCR] --> OLLAMA[Ollama Structurer] --> NLP
 
     TG_SVC --> LEDGER_SVC[LedgerService]
 
-    WEB -->|session cookie| WEB_CTRL["/api/v1/web/*"]
+    WEB -->|Clerk auth| WEB_CTRL["/api/v1/web/extract/*"]
+    WEB_CTRL -->|text| NLP
+    WEB_CTRL -->|audio| STT --> NLP
+    WEB_CTRL -->|image| ROBO --> OCR --> OLLAMA --> NLP
     WEB_CTRL --> LEDGER_SVC
 
     API --> LEDGER_API["/api/v1/ledger/*"]
@@ -83,6 +90,14 @@ flowchart TD
     TG_SVC --> SESSIONS[(telegram_sessions)]
 ```
 
+### Processing Times (Synchronous)
+
+| Modality | Pipeline Stages | Typical Duration |
+|---|---|---|
+| **Text** | NLP only | <1 second |
+| **Audio** | Whisper STT → NLP → Ledger | ~3-5 seconds |
+| **Image** | UPI Detection → OCR → Ollama → NLP → Ledger | ~5-7 seconds |
+
 ### Request lifecycle (Telegram expense)
 
 1. Telegram sends a webhook POST to `/api/v1/webhooks/telegram`.
@@ -93,6 +108,17 @@ flowchart TD
 6. `LedgerService` resolves the funding account, converts to minor units, validates, and calls `LedgerRepository.create_balanced_journal()`.
 7. The repository posts a journal header + 2 ledger entries (debit expense, credit funding) in a single DB transaction.
 8. The bot replies with amount, description, category, paid-from account, and journal ID.
+
+### Request lifecycle (Web dashboard expense)
+
+1. User uploads text/audio/image via Next.js dashboard.
+2. Frontend shows loading spinner and waits for response.
+3. Backend processes **synchronously** in the request handler:
+   - **Text:** NLP extraction → Ledger posting → Response (~1s)
+   - **Audio:** Whisper STT → NLP extraction → Ledger posting → Response (~3-5s)
+   - **Image:** UPI detection → OCR → Ollama structuring → NLP classification → Ledger posting → Response (~5-7s)
+4. Frontend receives complete result and displays transaction details.
+5. No polling, no WebSocket, no background jobs — simple request/response cycle.
 
 ---
 
@@ -199,6 +225,12 @@ Settings are loaded from `.env` at project root. The loader prefers `.env` value
 | `FOLD_RESET_DATABASE` | No | Set to `1` for one-time destructive schema reset |
 | `FOLD_WEB_ORIGINS` | No | Comma-separated CORS origins for Next.js (default: `http://localhost:3000`) |
 | `FOLD_WEB_SIGNING_SECRET` | No | HMAC secret for magic-link tokens (auto-generated if absent) |
+| `CLERK_SECRET_KEY` | No | Clerk API secret for web dashboard authentication |
+| `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` | No | Clerk publishable key for frontend |
+| `OLLAMA_ENABLED` | No | Enable Ollama LLM structuring (default: `false`) |
+| `OLLAMA_BASE_URL` | No | Ollama API endpoint (default: `http://localhost:11434`) |
+| `OLLAMA_MODEL` | No | Ollama model name (default: `llama3.2:3b`) |
+| `OLLAMA_TIMEOUT_SECONDS` | No | Ollama request timeout (default: `30`) |
 
 **Startup sequence** (`main.py`):
 1. `run_migrations()` — calls `ensure_schema()` (create-if-missing, no data wipe). Destructive reset only when `FOLD_RESET_DATABASE=1`.
@@ -214,8 +246,8 @@ Settings are loaded from `.env` at project root. The loader prefers `.env` value
 
 | Table | Purpose |
 |---|---|
-| `users` | `id`, `external_user_ref` (unique), `preferences_json`, `created_at` |
-| `accounts` | User-scoped chart of accounts. Fields: `code`, `name`, `account_type` (asset/liability/equity/income/expense/investment), `institution_name`, `account_number_last4`, `is_digital`, `currency`, `is_active` |
+| `users` | `id`, `clerk_user_id` (unique), `email`, `full_name`, `avatar_url`, `default_account_id`, `created_at`, `updated_at` |
+| `accounts` | User-scoped chart of accounts. Fields: `name`, `account_type` (cash/bank/credit), `balance` (minor units), `institution_name`, `account_number_last4`, `is_default`, `created_at`. **Constraint:** `positive_balance_non_credit` prevents negative balances for cash/bank accounts (credit cards can go negative) |
 | `payment_profiles` | UPI/card/wallet/bank_app profiles. Optional `linked_account_id` → `accounts`. Fields: `profile_type`, `provider`, `profile_name`, `handle_ref` |
 | `journal_transactions` | One row per business event. `source`, `description`, `external_ref`, `transaction_type` (expense/income/investment/transfer/opening_balance), `occurred_at`, `metadata_json`. Unique on `(user_id, source, external_ref)` with nulls distinct |
 | `journal_media` | Binary media (`file_bytes`) attached to a journal |
@@ -234,33 +266,106 @@ Settings are loaded from `.env` at project root. The loader prefers `.env` value
 
 ## Extraction Pipeline (OCR / STT / NLP)
 
-### Image Pipeline (Roboflow → OCR → NLP)
+**Architecture Note:** All extraction pipelines run **synchronously** in the API request handler. The user waits for the complete result. This eliminates the need for Redis queues, background workers, WebSocket notifications, and job polling.
 
-**Files:** `src/ocr/upi_detector.py`, `src/ocr/extractor.py`, `src/nlp/inference.py`
+### Why Synchronous?
 
-1. **Roboflow UPI logo detection** runs first on every image.
-2. **If UPI logo detected:** OCR runs in raw mode (`use_preprocessing=False`) — PaddleOCR's internal CNNs work best on clean screenshots.
-3. **If no UPI logo:** OCR runs with preprocessing (`use_preprocessing=True`) — OpenCV pipeline (grayscale, CLAHE, denoise, sharpen, binarize) for noisy physical receipts.
-4. OCR output goes through spatial sorting (reconstruct lines from bounding boxes) and heuristic filtering (keyword scan for Total/Amount/₹).
-5. `extract_payment_details()` parses amounts and payment modes from filtered lines.
-6. OCR text wall is fed to NLP for category classification and enrichment.
-7. **Merge policy:**
-   - Amount: OCR first, NLP fallback. UPI evidence → NLP amount priority; invoice → OCR amount priority.
-   - Payment method: OCR first, NLP fallback.
-   - Category: NLP always.
-   - Bank account: NLP (v3 model prediction).
+1. **Simplicity:** 2 processes (backend + frontend) instead of 3 (backend + worker + frontend)
+2. **Reliability:** No queue failures, no worker crashes, no job timeouts
+3. **User Experience:** Clear loading state, immediate feedback
+4. **Acceptable Latency:** Text (<1s), Audio (~3-5s), Image (~5-7s) are all reasonable wait times
+5. **No Infrastructure:** No Redis, no job queue, no worker management
+
+### Image Pipeline (Roboflow → OCR → Ollama → NLP)
+
+**Files:** `src/ocr/upi_detector.py`, `src/ocr/extractor.py`, `src/nlp/ollama_structurer.py`, `src/nlp/inference.py`
+
+**Processing Time:** ~5-7 seconds (synchronous)
+
+**Pipeline Stages:**
+
+1. **UPI Logo Detection (Roboflow)** — ~500ms
+   - Detects UPI app logos (GPay, PhonePe, Paytm, etc.) to identify payment provider
+   - Returns provider name and confidence score
+   - Determines OCR preprocessing strategy
+
+2. **OCR Extraction (PaddleOCR)** — ~2-3 seconds
+   - **If UPI logo detected:** Raw mode (`use_preprocessing=False`) — clean screenshots
+   - **If no UPI logo:** Preprocessing mode (`use_preprocessing=True`) — noisy physical receipts
+   - Extracts text lines with bounding boxes
+   - Spatial sorting to reconstruct reading order
+   - Heuristic filtering (keyword scan for Total/Amount/₹)
+   - Parses amounts, payment methods, card/account last4 digits
+
+3. **LLM Structuring (Ollama, optional)** — ~1-2 seconds
+   - Converts raw OCR text into structured JSON
+   - Extracts: amount, description, payment_method, payment_provider, bank_account
+   - Uses context hints from UPI detection and OCR parsing
+   - Handles Hinglish, typos, and OCR noise
+   - **Skipped if:** `OLLAMA_ENABLED=false` or Ollama service unavailable
+
+4. **NLP Classification (DistilBERT v3)** — ~500ms
+   - Multi-head model predicts: category, payment_method, bank_account
+   - Input: Ollama-structured text + raw OCR text (for robustness)
+   - Handles category classification (10 classes)
+   - Validates and enriches payment/bank predictions
+
+5. **Result Merging** — <100ms
+   - **Amount:** Ollama → OCR → NLP (priority order)
+   - **Payment Method:** Ollama → OCR → NLP
+   - **Payment Provider:** UPI detection → Ollama → OCR → NLP
+   - **Bank Account:** Ollama → NLP
+   - **Category:** NLP always (most reliable)
+   - **Receipt Last4:** OCR only (card/account number fragments)
+
+**Merge Policy Rationale:**
+- **UPI screenshots:** Ollama excels at structured extraction from clean text
+- **Physical receipts:** OCR heuristics catch amounts that LLMs might miss
+- **Category:** NLP model trained on 42.5k examples, most accurate
+- **Provider:** Visual detection (logo) is most reliable for UPI apps
 
 ### Voice Pipeline (Whisper → NLP)
 
-**File:** `src/stt/transcriber.py`
+**Files:** `src/stt/transcriber.py`, `src/nlp/inference.py`
 
-1. Audio file (.ogg, .wav, .mp3) decoded via FFmpeg.
-2. Whisper `small` model transcribes with `language="hi"` and a Hinglish domain prompt.
-3. Raw transcript passed to NLP extractor.
+**Processing Time:** ~3-5 seconds (synchronous)
+
+**Pipeline Stages:**
+
+1. **Audio Transcription (Whisper)** — ~2-4 seconds
+   - Audio file (.ogg, .wav, .mp3) decoded via FFmpeg
+   - Whisper `small` model transcribes with `language="hi"` and Hinglish domain prompt
+   - Handles code-mixed Hindi-English speech
+   - Returns raw transcript (no punctuation, run-on sentences)
+
+2. **NLP Extraction (DistilBERT v3)** — ~500ms
+   - Multi-head model processes transcript
+   - Extracts: amount, category, payment_method, bank_account
+   - Regex fallbacks for amount/payment if model misses
+
+3. **Ledger Posting** — <500ms
+   - Validates amount and funding account
+   - Posts double-entry journal
+   - Returns journal ID and transaction details
 
 ### Text Pipeline (NLP only)
 
-User text goes directly to `TransactionExtractor.extract()`.
+**File:** `src/nlp/inference.py`
+
+**Processing Time:** <1 second (synchronous)
+
+**Pipeline Stages:**
+
+1. **NLP Extraction (DistilBERT v3)** — ~500ms
+   - Multi-head model processes text
+   - Extracts: amount, category, payment_method, bank_account
+   - Regex fallbacks for amount/payment if model misses
+   - Category override lookup for known merchants
+
+2. **Ledger Posting** — <500ms
+   - Validates amount and funding account
+   - Posts double-entry journal
+   - Returns journal ID and transaction details
 
 ### OCR Support Modules
 
@@ -269,6 +374,7 @@ User text goes directly to `TransactionExtractor.extract()`.
 | `amount_plausibility.py` | Rejects ID-sized numbers, year-in-date-context, and bank-last4 misreads as amounts. `plausible_inr_amount()` enforces a sane range |
 | `cash_flow.py` | Detects expense vs income from UPI phrases ("paid to" → expense, "received from" → income) |
 | `upi_detector.py` | Roboflow HTTP client for UPI app logo detection. Returns logo class and confidence |
+| `ollama_structurer.py` | Ollama LLM client for structured data extraction from OCR text. Converts raw text to JSON with amount, description, payment details |
 
 ---
 
@@ -380,10 +486,18 @@ Wrong category? Tap Change category.
 
 ### Authentication
 
-1. Telegram bot issues a signed magic-link token via `web_auth_service.issue_magic_token()`.
-2. User clicks link → `GET /api/v1/web/auth/exchange?token=...` validates and sets `fold_session` cookie.
-3. Tokens are single-use, 5-minute TTL. Sessions last 7 days.
-4. All `/api/v1/web/*` endpoints require valid session cookie.
+**Current:** Clerk-based authentication (OAuth, magic links, email/password)
+
+1. User signs in via Clerk UI (embedded in Next.js app)
+2. Clerk issues JWT session token
+3. Frontend includes Clerk session token in API requests
+4. Backend validates token via `clerk_auth` middleware
+5. User record created/updated in `users` table with `clerk_user_id`
+
+**Legacy (deprecated):** Magic-link tokens via Telegram bot
+- Still supported for backward compatibility
+- `web_auth_service.issue_magic_token()` generates signed tokens
+- Single-use, 5-minute TTL, 7-day sessions
 
 ### Pages
 
@@ -408,15 +522,27 @@ Wrong category? Tap Change category.
 ### API Layer
 
 `web/src/lib/api.ts` provides typed fetch wrappers for:
-- `GET /api/v1/web/auth/me` — current session
+- `GET /api/v1/web/auth/me` — current session (legacy)
 - `GET /api/v1/web/dashboard?period=weekly|monthly` — aggregated dashboard data
 - `GET /api/v1/web/transactions?limit=&offset=` — paginated transactions
+- `POST /api/v1/web/extract/text` — synchronous text extraction
+- `POST /api/v1/web/extract/audio` — synchronous audio extraction (~3-5s)
+- `POST /api/v1/web/extract/image` — synchronous image extraction (~5-7s)
+
+**Extraction Flow:**
+1. User uploads file/text via dashboard
+2. Frontend shows loading spinner
+3. API processes synchronously (no queue)
+4. Response includes extracted data + ledger result
+5. Frontend displays transaction details
 
 ---
 
 ## API Surface
 
 ### Extraction APIs (`/api/v1`)
+
+**Legacy endpoints (no auth):**
 
 | Method | Endpoint | Input | Output |
 |---|---|---|---|
@@ -426,22 +552,46 @@ Wrong category? Tap Change category.
 | POST | `/correct` | `{ keyword, correct_category }` | Saves to `category_overrides.json` |
 | POST | `/extract/image/debug-upi` | image file upload | Roboflow UPI detection result |
 
-**TransactionResponse** shape:
+**Web dashboard endpoints (Clerk auth required):**
+
+| Method | Endpoint | Input | Output | Processing |
+|---|---|---|---|---|
+| POST | `/api/v1/web/extract/text` | `{ text }` | `ExtractionResponse` | **Synchronous** (~1s) |
+| POST | `/api/v1/web/extract/audio` | audio file upload | `ExtractionResponse` | **Synchronous** (~3-5s) |
+| POST | `/api/v1/web/extract/image` | image file upload | `ExtractionResponse` | **Synchronous** (~5-7s) |
+
+**ExtractionResponse** shape:
 ```json
 {
   "status": "success",
   "source": "text|audio|image",
-  "data": {
-    "text_transcript": "...",
+  "extracted_data": {
     "amount": 450.0,
     "category": "food",
     "payment_method": "upi",
-    "payment_provider": "slice",
-    "bank_account": "slice",
-    "cash_flow": "expense"
-  }
+    "payment_provider": "gpay",
+    "bank_account": "hdfc",
+    "transcript": "...",  // audio only
+    "ocr_text": "...",    // image only
+    "receipt_account_last4": "1234",  // image only
+    "receipt_institution_hint": "HDFC Bank"  // image only
+  },
+  "ledger_result": {
+    "journal_id": 42,
+    "status": "posted",
+    "amount_minor": 45000,
+    "funding_account": "hdfc_bank"
+  },
+  "message": "Saved food expense of ₹450"
 }
 ```
+
+**Processing Model:**
+- All web extraction endpoints are **synchronous**
+- User sees loading spinner while processing
+- Result returned in single HTTP response
+- No Redis queue, no background workers, no polling
+- Frontend shows transaction details immediately after response
 
 ### Ledger APIs (`/api/v1/ledger`)
 
@@ -584,21 +734,82 @@ Single-head `AutoModelForSequenceClassification` — category prediction only. R
 
 When an expense is posted, `LedgerService.post_expense()` resolves which account to debit using this priority chain:
 
-1. **Receipt OCR last4** — if OCR detected a card/account number fragment (e.g., "HDFC Bank ****1751"), match against user's accounts by `account_number_last4`.
+1. **Explicit funding account name** — if provided in the request, use it directly.
 
-2. **NLP bank_hint** — if the model or regex extracted a bank name (e.g., "slice", "hdfc"), match against user's accounts by `institution_name`, `name`, or `code` substring. Uses `resolve_funding_account_by_name()`. If the hint doesn't resolve to a real account, stale session funding is cleared to allow downstream logic a fair shot.
+2. **Payment provider (UPI app)** — if OCR/NLP detects a UPI provider (GPay, PhonePe, Paytm, etc.), look up the linked payment profile and use its linked bank account. **This ensures GPay charges the GPay-linked account, not the primary account.**
 
-3. **Payment method + provider** — keyword-based resolution:
-   - `cash` → `cash_wallet` asset account (auto-created if missing)
-   - `card` → `card_liability` liability account
-   - `upi` + provider → look up `payment_profiles` for a linked bank account
-   - provider only (no explicit method) → also try UPI profile lookup
+3. **Bank hint from NLP/OCR** — if the model or OCR extracted a bank name (e.g., "slice", "hdfc"), match against user's accounts by `institution_name`, `name`, or `code` substring. Uses `resolve_funding_account_by_name()`. If the hint doesn't resolve to a real account, stale session funding is cleared to allow downstream logic a fair shot.
 
-4. **Session default** — `telegram_sessions.funding_account_code` set during onboarding or `/start`.
+4. **Default account for payment method type** — if payment method is detected (cash/upi/card), use the default account for that type:
+   - `cash` → default cash account
+   - `upi` → default bank account
+   - `card` → default credit account
 
-5. **Primary account fallback** — user's primary funding account or first active asset account.
+5. **User's global default account** — fallback to the user's primary funding account or first active asset account.
 
-This chain ensures that explicit user mentions (e.g., "paid via Slice UPI") override stale session defaults that previously caused incorrect account charging.
+This chain ensures that explicit user mentions (e.g., "paid via Slice UPI") and visual provider detection (GPay logo) override stale session defaults that previously caused incorrect account charging.
+
+### Default Account System
+
+**Database:** Each account has an `is_default` boolean flag. Only one account per type (cash/bank/credit) can be default.
+
+**API Endpoint:**
+```
+POST /api/v1/ledger/accounts/{user_ref}/set-default?account_name=<name>
+```
+
+**Behavior:**
+- When setting an account as default, all other accounts of the same type are unmarked
+- Default accounts are used when payment method is detected but no specific account is identified
+- Users can have different defaults for cash, bank (UPI), and credit card transactions
+
+**Example:**
+- Default cash account: "Cash Wallet"
+- Default bank account: "HDFC Bank" (used for UPI)
+- Default credit account: "ICICI Credit Card"
+
+When a transaction comes in with `payment_method="upi"` but no provider/bank hint, it charges the default bank account.
+
+### Balance Guardrails
+
+**Three-Layer Protection Against Negative Balances:**
+
+1. **Database Constraint** (strongest):
+   ```sql
+   CONSTRAINT positive_balance_non_credit CHECK (
+       account_type = 'credit' OR balance >= 0
+   )
+   ```
+   - Cash and bank accounts cannot go negative
+   - Credit cards can go negative (representing debt)
+   - Database rejects any transaction that would violate this
+
+2. **Application Layer** (`ledger_repository.py`):
+   ```python
+   def update_account_balance(account_id, amount_delta):
+       current_balance = get_balance(account_id)
+       new_balance = current_balance + amount_delta
+       
+       if new_balance < 0 and account_type != "credit":
+           raise ValueError(
+               f"Insufficient balance in {account_name}. "
+               f"Current: ₹{current/100:,.2f}, Required: ₹{abs(delta)/100:,.2f}"
+           )
+   ```
+   - Pre-flight balance check before every transaction
+   - Clear error messages showing current balance and required amount
+
+3. **Frontend Validation** (`accounts/page.tsx`):
+   - Input validation: `min="0.01"` on amount fields
+   - Negative balances displayed in red color
+   - User-friendly error alerts with specific balance information
+
+**Cash Wallet Simplification:**
+
+Cash wallets have a simplified creation flow:
+- **Required:** Nickname (optional, defaults to "Cash Wallet") + Current amount
+- **Not required:** Institution name, account number last4
+- Backend automatically sets `institution_name = "Cash"` for cash accounts
 
 ---
 
@@ -609,6 +820,7 @@ This chain ensures that explicit user mentions (e.g., "paid via Slice UPI") over
 1. **Versioned migrations** — replace `ensure_schema()` DDL with Alembic for additive schema changes.
 2. **Training export pipeline** — append user category corrections to CSV/Parquet for batch fine-tuning (active learning loop). Design exists but implementation deferred pending PII/retention decisions.
 3. **Integration tests** — automated tests for all journal template paths, report filters, and funding resolution logic.
+4. **Error handling** — graceful degradation when Ollama/Roboflow unavailable; better user feedback for extraction failures.
 
 ### Medium Priority
 
@@ -638,12 +850,24 @@ cd src
 uvicorn api.main:app --reload --port 8000
 ```
 
+**Required services:**
+- PostgreSQL database (connection string in `.env`)
+- Ollama (optional, for LLM structuring): `ollama serve` + `ollama pull llama3.2:3b`
+
+**No longer required:**
+- ❌ Redis (removed in synchronous migration)
+- ❌ Worker process (removed in synchronous migration)
+
 ### Running the frontend
 
 ```bash
 cd web
 npm run dev
 ```
+
+**Required:**
+- Backend running on `http://localhost:8000`
+- Clerk credentials in `.env.local`
 
 ### One-time database reset
 
