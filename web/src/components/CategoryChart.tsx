@@ -13,8 +13,8 @@ export default function CategoryChart({ data, title }: Props) {
   if (!data.length) {
     return (
       <section>
-        <h2 className="text-sm font-semibold text-[#666666] mb-3">{title}</h2>
-        <p className="text-[#999999] text-sm">No data for this period.</p>
+        <h2 className="text-sm font-semibold text-gray-300 mb-3">{title}</h2>
+        <p className="text-gray-500 text-sm">No data for this period.</p>
       </section>
     );
   }
@@ -23,7 +23,7 @@ export default function CategoryChart({ data, title }: Props) {
 
   return (
     <section className="flex flex-col h-full">
-      <h2 className="text-sm font-semibold text-[#666666] mb-3">{title}</h2>
+      <h2 className="text-sm font-semibold text-gray-300 mb-3">{title}</h2>
       <div className="flex flex-col sm:flex-row items-center gap-4 flex-1 min-h-0">
         <div className="flex-shrink-0" style={{ width: 180, height: 180 }}>
           <ResponsiveContainer width={180} height={180}>
@@ -37,7 +37,7 @@ export default function CategoryChart({ data, title }: Props) {
                 innerRadius={48}
                 outerRadius={76}
                 strokeWidth={2}
-                stroke="#ffffff"
+                stroke="rgba(255,255,255,0.1)"
               >
                 {data.map((entry) => (
                   <Cell key={entry.key} fill={categoryColor(entry.key)} />
@@ -47,11 +47,11 @@ export default function CategoryChart({ data, title }: Props) {
                 formatter={(value) => formatINR(Number(value))}
                 labelFormatter={(label) => capitalize(String(label))}
                 contentStyle={{
-                  backgroundColor: "#ffffff",
-                  border: "1px solid #e5e5e5",
+                  backgroundColor: "rgba(0,0,0,0.9)",
+                  border: "1px solid rgba(255,255,255,0.1)",
                   borderRadius: "0.75rem",
                   fontSize: "0.75rem",
-                  boxShadow: "0 2px 4px rgba(0,0,0,0.05)",
+                  color: "#fff",
                 }}
               />
             </PieChart>
@@ -67,13 +67,13 @@ export default function CategoryChart({ data, title }: Props) {
                   className="w-3 h-3 rounded-full flex-shrink-0"
                   style={{ backgroundColor: categoryColor(row.key) }}
                 />
-                <span className="text-[#202020] flex-1 truncate font-medium">
+                <span className="text-white flex-1 truncate font-medium">
                   {capitalize(row.key)}
                 </span>
-                <span className="text-[#666666] tabular-nums text-xs">
+                <span className="text-gray-400 tabular-nums text-xs">
                   {formatINR(row.amount_minor)}
                 </span>
-                <span className="text-[#999999] text-xs w-10 text-right tabular-nums">
+                <span className="text-gray-500 text-xs w-10 text-right tabular-nums">
                   {pct}%
                 </span>
               </li>

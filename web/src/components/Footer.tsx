@@ -23,7 +23,7 @@ const defaultSections: FooterSection[] = [
   {
     title: "Product",
     links: [
-      { label: "Dashboard", href: "/dashboard" },
+      { label: "Dashboard", href: "/reports" },
       { label: "Chat", href: "/chat" },
       { label: "Transactions", href: "/transactions" },
       { label: "Accounts", href: "/accounts" },
@@ -34,8 +34,8 @@ const defaultSections: FooterSection[] = [
     links: [
       { label: "Image Recognition", href: "/chat" },
       { label: "Voice Input", href: "/chat" },
-      { label: "AI Categorization", href: "/dashboard" },
-      { label: "Smart Analytics", href: "/dashboard" },
+      { label: "AI Categorization", href: "/reports" },
+      { label: "Smart Analytics", href: "/reports" },
     ],
   },
   {
@@ -68,8 +68,8 @@ export const Footer = ({
   const copyright = copyrightText || `© ${currentYear} ${companyName}. All rights reserved.`
 
   return (
-    <footer className="w-full bg-white border-t border-gray-200">
-      <div className="max-w-[1400px] mx-auto px-6 md:px-12 py-20">
+    <footer className="w-full border-t border-white/10">
+      <div className="max-w-350 mx-auto px-6 md:px-12 py-20">
         <div className="grid grid-cols-2 md:grid-cols-6 gap-12 mb-16">
           <motion.div
             initial={{ opacity: 0, y: 20 }}
@@ -79,10 +79,10 @@ export const Footer = ({
             className="col-span-2"
           >
             <div className="mb-6">
-              <h3 className="text-[24px] font-light text-black mb-3">
+              <h3 className="text-[24px] font-light text-white mb-3">
                 {companyName}
               </h3>
-              <p className="text-[15px] leading-relaxed text-[#666] max-w-xs font-light">
+              <p className="text-[15px] leading-relaxed text-gray-400 max-w-xs font-light">
                 {tagline}
               </p>
             </div>
@@ -97,7 +97,7 @@ export const Footer = ({
               transition={{ duration: 0.5, delay: index * 0.1, ease: "easeOut" }}
               className="col-span-1"
             >
-              <h4 className="text-[13px] font-medium text-black mb-4 uppercase tracking-wider">
+              <h4 className="text-[13px] font-medium text-white mb-4 uppercase tracking-wider">
                 {section.title}
               </h4>
               <ul className="space-y-3">
@@ -106,14 +106,14 @@ export const Footer = ({
                     {link.href.startsWith("#") ? (
                       <a
                         href={link.href}
-                        className="text-[15px] text-[#666] hover:text-black transition-colors duration-150 font-light cursor-pointer"
+                        className="text-[15px] text-gray-400 hover:text-white transition-colors duration-150 font-light cursor-pointer"
                       >
                         {link.label}
                       </a>
                     ) : (
                       <Link
                         href={link.href}
-                        className="text-[15px] text-[#666] hover:text-black transition-colors duration-150 font-light cursor-pointer"
+                        className="text-[15px] text-gray-400 hover:text-white transition-colors duration-150 font-light cursor-pointer"
                       >
                         {link.label}
                       </Link>
@@ -130,10 +130,10 @@ export const Footer = ({
           whileInView={{ opacity: 1 }}
           viewport={{ once: true }}
           transition={{ duration: 0.5, delay: 0.6 }}
-          className="pt-8 border-t border-gray-200"
+          className="pt-8 border-t border-white/10"
         >
           <div className="flex flex-col md:flex-row justify-between items-center gap-4">
-            <p className="text-[14px] text-[#999] font-light">{copyright}</p>
+            <p className="text-[14px] text-gray-500 font-light">{copyright}</p>
           </div>
         </motion.div>
       </div>

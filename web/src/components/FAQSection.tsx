@@ -16,29 +16,29 @@ type FAQSectionProps = {
 
 const defaultFAQs: FAQItem[] = [
   {
-    question: "What is Fold and how does it work?",
+    question: "What is Fold?",
     answer:
-      "Fold is an AI-powered expense tracking system designed for Indian users. It accepts multiple input types: upload receipt images (including UPI screenshots), record voice notes in Hinglish, or simply type your expenses. Our AI automatically extracts amounts, categorizes transactions, detects payment methods, and maintains double-entry accounting ledgers. All processing happens in real-time, giving you instant financial insights.",
+      "AI-powered expense tracking for India. Upload receipts, record voice notes in Hinglish, or type. We automatically extract amounts, categorize transactions, and give you real-time insights.",
   },
   {
-    question: "Does Fold support Indian languages and payment methods?",
+    question: "Does it support Indian payment methods?",
     answer:
-      "Yes! Fold is built specifically for India. It natively supports Hinglish (Hindi-English code-mixed) voice and text input. Our OCR system recognizes UPI apps like GPay, PhonePe, Paytm, and others. We support all major Indian banks (HDFC, ICICI, SBI, Axis, etc.) and payment methods including UPI, cards, and cash. The system understands Indian currency formats and handles amounts in rupees with paisa precision.",
+      "Yes. Built for India with support for UPI (GPay, PhonePe, Paytm), all major banks, and Hinglish input. Handles rupees with paisa precision.",
   },
   {
-    question: "How accurate is the AI extraction and can I correct mistakes?",
+    question: "How accurate is it?",
     answer:
-      "Our multi-modal AI achieves 95%+ accuracy on receipt OCR and uses a fine-tuned DistilBERT model trained on 42,500+ Indian transaction examples. For images, we use Roboflow for UPI detection, PaddleOCR for text extraction, and optional LLM structuring. You can always correct categories after posting—the system learns from your corrections and improves over time. All transactions are stored with double-entry accounting precision.",
+      "95%+ accuracy using AI trained on 42,500+ Indian transactions. You can correct any mistakes, and the system learns from your edits.",
   },
   {
-    question: "Is my financial data secure and private?",
+    question: "Is my data secure?",
     answer:
-      "Absolutely. All data is encrypted and stored securely in PostgreSQL. We use Clerk for authentication with industry-standard security practices. Your financial information never leaves our secure servers, and we never share data with third parties. You have complete control over your data and can export or delete it anytime. The system processes everything locally without sending sensitive information to external APIs.",
+      "Encrypted and private. We never share your data with third parties. You control everything and can export or delete anytime.",
   },
   {
-    question: "What features does Fold offer and how do I get started?",
+    question: "How do I get started?",
     answer:
-      "Fold offers multi-modal expense tracking (text, voice, image), automatic categorization across 10 categories, payment method detection, bank account linking, UPI profile management, weekly and monthly reports, category breakdowns, and a comprehensive dashboard with charts and insights. Getting started is simple: sign up, add your bank accounts or UPI profiles, and start tracking expenses via the web dashboard or Telegram bot. The free tier includes all core features.",
+      "Sign up, add your accounts, and start tracking via text, voice, or images. All core features are free.",
   },
 ]
 
@@ -50,25 +50,46 @@ export const FAQSection = ({ title = "Frequently asked questions", faqs = defaul
   }
 
   return (
-    <section className="w-full py-32 px-6 md:px-12 bg-white">
-      <div className="max-w-[1400px] mx-auto">
+    <section className="w-full py-32 px-6 md:px-12 bg-transparent relative">
+      {/* Subtle background pattern */}
+      <div className="absolute inset-0 opacity-[0.03]">
+        <div className="absolute inset-0" style={{
+          backgroundImage: `radial-gradient(circle at 2px 2px, rgba(255, 255, 255, 0.05) 1px, transparent 0)`,
+          backgroundSize: '40px 40px'
+        }} />
+      </div>
+      
+      <div className="max-w-350 mx-auto relative z-10">
         <div className="grid lg:grid-cols-12 gap-16 lg:gap-24">
           <div className="lg:col-span-4">
-            <h2 className="text-[40px] md:text-[48px] leading-tight font-light text-black tracking-tight sticky top-24">
-              {title}
-            </h2>
+            <div className="sticky top-24">
+              <h2 className="text-[40px] md:text-[48px] leading-tight font-light text-white tracking-tight mb-6">
+                {title}
+              </h2>
+              <div className="w-20 h-1 bg-linear-to-r from-gray-400 to-transparent rounded-full" />
+            </div>
           </div>
 
           <div className="lg:col-span-8">
             <div className="space-y-0">
               {faqs.map((faq, index) => (
-                <div key={index} className="border-b border-gray-200 last:border-b-0">
+                <motion.div 
+                  key={index} 
+                  className="border-b border-white/10 last:border-b-0 relative group"
+                  initial={{ opacity: 0, y: 20 }}
+                  whileInView={{ opacity: 1, y: 0 }}
+                  viewport={{ once: true }}
+                  transition={{ duration: 0.5, delay: index * 0.1 }}
+                >
+                  {/* Hover background */}
+                  <div className="absolute inset-0 bg-linear-to-r from-white/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300 rounded-lg" />
+                  
                   <button
                     onClick={() => toggleFAQ(index)}
-                    className="w-full flex items-center justify-between py-8 text-left group hover:opacity-70 transition-opacity duration-150 cursor-pointer"
+                    className="w-full flex items-center justify-between py-8 text-left group hover:opacity-70 transition-opacity duration-150 cursor-pointer relative z-10"
                     aria-expanded={openIndex === index}
                   >
-                    <span className="text-[17px] leading-relaxed text-black pr-8 font-light">
+                    <span className="text-[17px] leading-relaxed text-white pr-8 font-light">
                       {faq.question}
                     </span>
                     <motion.div
@@ -76,7 +97,7 @@ export const FAQSection = ({ title = "Frequently asked questions", faqs = defaul
                       transition={{ duration: 0.2, ease: [0.4, 0, 0.2, 1] }}
                       className="shrink-0"
                     >
-                      <Plus className="w-6 h-6 text-black" strokeWidth={1.5} />
+                      <Plus className="w-6 h-6 text-white" strokeWidth={1.5} />
                     </motion.div>
                   </button>
 
@@ -87,17 +108,17 @@ export const FAQSection = ({ title = "Frequently asked questions", faqs = defaul
                         animate={{ height: "auto", opacity: 1 }}
                         exit={{ height: 0, opacity: 0 }}
                         transition={{ duration: 0.3, ease: [0.4, 0, 0.2, 1] }}
-                        className="overflow-hidden"
+                        className="overflow-hidden relative z-10"
                       >
                         <div className="pb-8 pr-12">
-                          <p className="text-[15px] leading-relaxed text-[#666] font-light">
+                          <p className="text-[15px] leading-relaxed text-gray-400 font-light">
                             {faq.answer}
                           </p>
                         </div>
                       </motion.div>
                     )}
                   </AnimatePresence>
-                </div>
+                </motion.div>
               ))}
             </div>
           </div>

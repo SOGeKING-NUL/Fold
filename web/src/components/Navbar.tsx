@@ -54,7 +54,7 @@ export const Navbar = () => {
   return (
     <nav
       className={`fixed top-0 left-0 right-0 z-50 transition-all duration-300 ${
-        isScrolled ? "bg-background/95 backdrop-blur-md shadow-sm" : "bg-transparent"
+        isScrolled ? "bg-black/70 backdrop-blur-md border-b border-white/10" : "bg-transparent"
       }`}
     >
       <div className="max-w-7xl mx-auto px-6 lg:px-8">
@@ -62,7 +62,7 @@ export const Navbar = () => {
           <div className="shrink-0">
             <button
               onClick={() => handleLinkClick("")}
-              className="text-2xl text-foreground hover:text-primary transition-colors duration-200 cursor-pointer"
+              className="text-2xl text-white hover:text-gray-300 transition-colors duration-200 cursor-pointer font-medium"
             >
               Fold AI
             </button>
@@ -75,10 +75,10 @@ export const Navbar = () => {
                   <button
                     key={link.name}
                     onClick={() => handleLinkClick(link.href)}
-                    className="text-foreground hover:text-primary px-3 py-2 text-base font-normal transition-colors duration-200 relative group cursor-pointer"
+                    className="text-white hover:text-gray-300 font-semibold px-3 py-2 text-base transition-colors duration-200 relative group cursor-pointer"
                   >
                     {link.name}
-                    <div className="absolute bottom-0 left-0 w-0 h-0.5 bg-primary transition-all duration-300 group-hover:w-full" />
+                    <div className="absolute bottom-0 left-0 w-0 h-0.5 bg-gray-300 transition-all duration-300 group-hover:w-full" />
                   </button>
                 ))}
               </div>
@@ -89,17 +89,17 @@ export const Navbar = () => {
             {isSignedIn ? (
               <>
                 <button
-                  onClick={() => router.push("/dashboard")}
-                  className="px-4 py-2 text-sm bg-[#156d95] hover:bg-[#156d95]/90 text-white rounded-lg transition-colors cursor-pointer"
+                  onClick={() => router.push("/reports")}
+                  className="px-4 py-2 text-sm bg-[#1e3a8a] hover:bg-[#1e40af] text-white rounded-lg transition-colors cursor-pointer font-medium"
                 >
-                  View Dashboard
+                  View Report
                 </button>
                 <UserButton />
               </>
             ) : (
               <button
                 onClick={() => router.push("/login")}
-                className="px-4 py-2 text-sm bg-[#156d95] hover:bg-[#156d95]/90 text-white rounded-lg transition-colors cursor-pointer"
+                className="px-4 py-2 text-sm bg-[#1e3a8a] hover:bg-[#1e40af] text-white rounded-lg transition-colors cursor-pointer font-medium"
               >
                 Sign In
               </button>
@@ -109,7 +109,7 @@ export const Navbar = () => {
           <div className="md:hidden">
             <button
               onClick={toggleMobileMenu}
-              className="text-foreground hover:text-primary p-2 rounded-md transition-colors duration-200 cursor-pointer"
+              className="text-gray-200 hover:text-white p-2 rounded-md transition-colors duration-200 cursor-pointer"
               aria-label="Toggle mobile menu"
             >
               {isMobileMenuOpen ? <X size={24} /> : <Menu size={24} />}
@@ -125,30 +125,30 @@ export const Navbar = () => {
             animate={{ opacity: 1, height: "auto" }}
             exit={{ opacity: 0, height: 0 }}
             transition={{ duration: 0.3, ease: "easeInOut" }}
-            className="md:hidden bg-background/95 backdrop-blur-md border-t border-border"
+            className="md:hidden bg-black/70 backdrop-blur-md border-t border-white/10"
           >
             <div className="px-6 py-6 space-y-4">
               {isSignedIn && navigationLinks.map((link) => (
                 <button
                   key={link.name}
                   onClick={() => handleLinkClick(link.href)}
-                  className="block w-full text-left text-foreground hover:text-primary py-3 text-lg font-normal transition-colors duration-200 cursor-pointer"
+                  className="block w-full text-left text-white hover:text-gray-300 py-3 text-lg font-normal transition-colors duration-200 cursor-pointer"
                 >
                   {link.name}
                 </button>
               ))}
-              <div className="pt-4 border-t border-border">
+              <div className="pt-4 border-t border-white/5">
                 {isSignedIn ? (
                   <button
-                    onClick={() => handleLinkClick("/dashboard")}
-                    className="w-full bg-[#156d95] text-white px-[18px] py-[15px] rounded-lg text-base font-semibold hover:bg-[#156d95]/90 transition-all duration-200 cursor-pointer"
+                    onClick={() => handleLinkClick("/reports")}
+                    className="w-full bg-[#1e3a8a] text-white px-4.5 py-3.75 rounded-lg text-base font-semibold hover:bg-[#1e40af] transition-all duration-200 cursor-pointer"
                   >
-                    View Dashboard
+                    View Report
                   </button>
                 ) : (
                   <button
                     onClick={() => handleLinkClick("/login")}
-                    className="w-full bg-[#156d95] text-white px-[18px] py-[15px] rounded-lg text-base font-semibold hover:bg-[#156d95]/90 transition-all duration-200 cursor-pointer"
+                    className="w-full bg-[#1e3a8a] text-white px-[18px] py-[15px] rounded-lg text-base font-semibold hover:bg-[#1e40af] transition-all duration-200 cursor-pointer"
                   >
                     Sign In
                   </button>

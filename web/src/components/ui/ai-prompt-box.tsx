@@ -1,11 +1,16 @@
 import React from "react";
 import * as TooltipPrimitive from "@radix-ui/react-tooltip";
 import * as DialogPrimitive from "@radix-ui/react-dialog";
-import { ArrowUp, Paperclip, Square, X, StopCircle, Mic, Globe, BrainCog, FolderCode } from "lucide-react";
-import { motion, AnimatePresence } from "framer-motion";
+import { ArrowUp, Paperclip, Square, X, StopCircle, Mic } from "lucide-react";
+import { motion } from "framer-motion";
 
 // Utility function for className merging
 const cn = (...classes: (string | undefined | null | false)[]) => classes.filter(Boolean).join(" ");
+
+const unitNoise = (n: number) => {
+  const x = Math.sin(n * 999) * 10000;
+  return x - Math.floor(x);
+};
 
 // Textarea Component
 interface TextareaProps extends React.TextareaHTMLAttributes<HTMLTextAreaElement> {
@@ -15,7 +20,7 @@ interface TextareaProps extends React.TextareaHTMLAttributes<HTMLTextAreaElement
 const Textarea = React.forwardRef<HTMLTextAreaElement, TextareaProps>(({ className, ...props }, ref) => (
   <textarea
     className={cn(
-      "flex w-full rounded-md border-none bg-transparent px-3 py-2.5 text-base text-gray-100 placeholder:text-gray-400 focus-visible:outline-none focus-visible:ring-0 disabled:cursor-not-allowed disabled:opacity-50 min-h-[44px] resize-none scrollbar-thin scrollbar-thumb-[#444444] scrollbar-track-transparent hover:scrollbar-thumb-[#555555]",
+      "flex w-full rounded-md bg-transparent px-3 py-2.5 text-base text-gray-100 placeholder:text-gray-400 disabled:cursor-not-allowed disabled:opacity-50 min-h-11 resize-none scrollbar-thin scrollbar-thumb-[#444444] scrollbar-track-transparent hover:scrollbar-thumb-[#555555]",
       className
     )}
     ref={ref}
@@ -29,7 +34,6 @@ Textarea.displayName = "Textarea";
 const TooltipProvider = TooltipPrimitive.Provider;
 const Tooltip = TooltipPrimitive.Root;
 const TooltipTrigger = TooltipPrimitive.Trigger;
-
 const TooltipContent = React.forwardRef<
   React.ElementRef<typeof TooltipPrimitive.Content>,
   React.ComponentPropsWithoutRef<typeof TooltipPrimitive.Content>
@@ -38,7 +42,7 @@ const TooltipContent = React.forwardRef<
     ref={ref}
     sideOffset={sideOffset}
     className={cn(
-      "z-50 overflow-hidden rounded-md border border-[#333333] bg-[#1F2023] px-3 py-1.5 text-sm text-white shadow-md animate-in fade-in-0 zoom-in-95 data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95 data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2",
+      "z-50 overflow-hidden rounded-md border border-white/10 bg-black/80 px-3 py-1.5 text-sm text-white shadow-md backdrop-blur-md animate-in fade-in-0 zoom-in-95 data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95 data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2",
       className
     )}
     {...props}
@@ -74,13 +78,13 @@ const DialogContent = React.forwardRef<
     <DialogPrimitive.Content
       ref={ref}
       className={cn(
-        "fixed left-[50%] top-[50%] z-50 grid w-full max-w-[90vw] md:max-w-[800px] translate-x-[-50%] translate-y-[-50%] gap-4 border border-[#333333] bg-[#1F2023] p-0 shadow-xl duration-300 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 rounded-2xl",
+        "fixed left-[50%] top-[50%] z-50 grid w-full max-w-[90vw] md:max-w-200 translate-x-[-50%] translate-y-[-50%] gap-4 border border-white/10 bg-black/70 p-0 shadow-2xl backdrop-blur-md duration-300 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 rounded-2xl",
         className
       )}
       {...props}
     >
       {children}
-      <DialogPrimitive.Close className="absolute right-4 top-4 z-10 rounded-full bg-[#2E3033]/80 p-2 hover:bg-[#2E3033] transition-all">
+      <DialogPrimitive.Close className="absolute right-4 top-4 z-10 rounded-full bg-white/10 p-2 hover:bg-white/15 transition-all">
         <X className="h-5 w-5 text-gray-200 hover:text-white" />
         <span className="sr-only">Close</span>
       </DialogPrimitive.Close>
@@ -110,16 +114,16 @@ interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
 const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
   ({ className, variant = "default", size = "default", ...props }, ref) => {
     const variantClasses = {
-      default: "bg-white hover:bg-white/80 text-black",
-      outline: "border border-[#444444] bg-transparent hover:bg-[#3A3A40]",
-      ghost: "bg-transparent hover:bg-[#3A3A40]",
+      default: "bg-[#1e3a8a] hover:bg-[#1e40af] text-white",
+      outline: "border border-white/15 bg-transparent hover:bg-white/10 text-white",
+      ghost: "bg-transparent hover:bg-white/10 text-white",
     };
 
     const sizeClasses = {
       default: "h-10 px-4 py-2",
       sm: "h-8 px-3 text-sm",
       lg: "h-12 px-6",
-      icon: "h-8 w-8 rounded-full aspect-[1/1]",
+      icon: "h-8 w-8 rounded-full aspect-square",
     };
 
     return (
@@ -136,6 +140,7 @@ const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
     );
   }
 );
+Button.displayName = "Button";
 Button.displayName = "Button";
 
 // VoiceRecorder Component
@@ -157,11 +162,22 @@ const VoiceRecorder: React.FC<VoiceRecorderProps> = ({
   const mediaRecorderRef = React.useRef<MediaRecorder | null>(null);
   const audioChunksRef = React.useRef<Blob[]>([]);
 
+  const onStartRecordingRef = React.useRef(onStartRecording);
+  const onStopRecordingRef = React.useRef(onStopRecording);
+
   const timeRef = React.useRef(0);
 
   React.useEffect(() => {
+    onStartRecordingRef.current = onStartRecording;
+  }, [onStartRecording]);
+
+  React.useEffect(() => {
+    onStopRecordingRef.current = onStopRecording;
+  }, [onStopRecording]);
+
+  React.useEffect(() => {
     if (isRecording) {
-      onStartRecording();
+      onStartRecordingRef.current();
       timeRef.current = 0;
       setTime(0);
       timerRef.current = setInterval(() => {
@@ -186,7 +202,7 @@ const VoiceRecorder: React.FC<VoiceRecorderProps> = ({
           
           mediaRecorder.onstop = () => {
             const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
-            onStopRecording(timeRef.current, audioBlob);
+            onStopRecordingRef.current(timeRef.current, audioBlob);
             
             // Stop all tracks to release microphone
             stream.getTracks().forEach(track => track.stop());
@@ -197,7 +213,7 @@ const VoiceRecorder: React.FC<VoiceRecorderProps> = ({
         })
         .catch((err) => {
           console.error("Error accessing microphone:", err);
-          onStopRecording(0); // Call with no blob on error
+          onStopRecordingRef.current(0); // Call with no blob on error
         });
 
     } else {
@@ -208,7 +224,7 @@ const VoiceRecorder: React.FC<VoiceRecorderProps> = ({
       
       if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
         mediaRecorderRef.current.stop();
-      } else if (time === 0) {
+      } else if (timeRef.current === 0) {
           // just in case it was never started
           setTime(0);
       }
@@ -219,7 +235,7 @@ const VoiceRecorder: React.FC<VoiceRecorderProps> = ({
           mediaRecorderRef.current.stop();
       }
     };
-  }, [isRecording]); // removed dependencies that cause loops or early stops
+  }, [isRecording]);
 
   const formatTime = (seconds: number) => {
     const mins = Math.floor(seconds / 60);
@@ -240,15 +256,23 @@ const VoiceRecorder: React.FC<VoiceRecorderProps> = ({
       </div>
       <div className="w-full h-10 flex items-center justify-center gap-0.5 px-4">
         {[...Array(visualizerBars)].map((_, i) => (
+          (() => {
+            const seed = unitNoise(i + time * 0.75);
+            const height = Math.max(15, seed * 100);
+            const duration = 0.5 + seed * 0.5;
+
+            return (
           <div
             key={i}
             className="w-0.5 rounded-full bg-white/50 animate-pulse"
             style={{
-              height: `${Math.max(15, Math.random() * 100)}%`,
+              height: `${height}%`,
               animationDelay: `${i * 0.05}s`,
-              animationDuration: `${0.5 + Math.random() * 0.5}s`,
+              animationDuration: `${duration}s`,
             }}
           />
+            );
+          })()
         ))}
       </div>
     </div>
@@ -266,15 +290,16 @@ const ImageViewDialog: React.FC<ImageViewDialogProps> = ({ imageUrl, onClose }) 
 
   return (
     <Dialog open={!!imageUrl} onOpenChange={onClose}>
-      <DialogContent className="p-0 border-none bg-transparent shadow-none max-w-[90vw] md:max-w-[800px]">
+      <DialogContent className="p-0 border-none bg-transparent shadow-none max-w-[90vw] md:max-w-200">
         <DialogTitle className="sr-only">Image Preview</DialogTitle>
         <motion.div
           initial={{ opacity: 0, scale: 0.95 }}
           animate={{ opacity: 1, scale: 1 }}
           exit={{ opacity: 0, scale: 0.95 }}
           transition={{ duration: 0.2, ease: "easeOut" }}
-          className="relative bg-[#1F2023] rounded-2xl overflow-hidden shadow-2xl"
+          className="relative bg-black/70 border border-white/10 rounded-2xl overflow-hidden shadow-2xl backdrop-blur-md"
         >
+          {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
             src={imageUrl}
             alt="Full preview"
@@ -427,7 +452,7 @@ const PromptInputTextarea: React.FC<PromptInputTextareaProps & React.ComponentPr
   );
 };
 
-interface PromptInputActionsProps extends React.HTMLAttributes<HTMLDivElement> {}
+type PromptInputActionsProps = React.HTMLAttributes<HTMLDivElement>;
 
 const PromptInputActions: React.FC<PromptInputActionsProps> = ({ children, className, ...props }) => (
   <div className={cn("flex items-center gap-2", className)} {...props}>
@@ -484,9 +509,9 @@ export const PromptInputBox = React.forwardRef((props: PromptInputBoxProps, ref:
   const uploadInputRef = React.useRef<HTMLInputElement>(null);
   const promptBoxRef = React.useRef<HTMLDivElement>(null);
 
-  const isImageFile = (file: File) => file.type.startsWith("image/");
+  const isImageFile = React.useCallback((file: File) => file.type.startsWith("image/"), []);
 
-  const processFile = (file: File) => {
+  const processFile = React.useCallback((file: File) => {
     if (!isImageFile(file)) {
       console.log("Only image files are allowed");
       return;
@@ -499,7 +524,7 @@ export const PromptInputBox = React.forwardRef((props: PromptInputBoxProps, ref:
     const reader = new FileReader();
     reader.onload = (e) => setFilePreviews({ [file.name]: e.target?.result as string });
     reader.readAsDataURL(file);
-  };
+  }, [isImageFile]);
 
   const handleDragOver = React.useCallback((e: React.DragEvent) => {
     e.preventDefault();
@@ -517,7 +542,7 @@ export const PromptInputBox = React.forwardRef((props: PromptInputBoxProps, ref:
     const files = Array.from(e.dataTransfer.files);
     const imageFiles = files.filter((file) => isImageFile(file));
     if (imageFiles.length > 0) processFile(imageFiles[0]);
-  }, []);
+  }, [isImageFile, processFile]);
 
   const handleRemoveFile = (index: number) => {
     const fileToRemove = files[index];
@@ -541,7 +566,7 @@ export const PromptInputBox = React.forwardRef((props: PromptInputBoxProps, ref:
         }
       }
     }
-  }, []);
+  }, [processFile]);
 
   React.useEffect(() => {
     document.addEventListener("paste", handlePaste);
@@ -587,7 +612,7 @@ export const PromptInputBox = React.forwardRef((props: PromptInputBoxProps, ref:
         isLoading={isLoading}
         onSubmit={handleSubmit}
         className={cn(
-          "w-full bg-[#1F2023] border-[#444444] shadow-[0_8px_30px_rgba(0,0,0,0.24)] transition-all duration-300 ease-in-out",
+          "w-full bg-white/5 backdrop-blur-sm shadow-lg transition-all duration-300 ease-in-out",
           isRecording && "border-red-500/70",
           className
         )}
@@ -606,6 +631,7 @@ export const PromptInputBox = React.forwardRef((props: PromptInputBoxProps, ref:
                     className="w-16 h-16 rounded-xl overflow-hidden cursor-pointer transition-all duration-300"
                     onClick={() => openImageModal(filePreviews[file.name])}
                   >
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img
                       src={filePreviews[file.name]}
                       alt={file.name}
@@ -695,7 +721,7 @@ export const PromptInputBox = React.forwardRef((props: PromptInputBoxProps, ref:
                 isRecording
                   ? "bg-transparent hover:bg-gray-600/30 text-red-500 hover:text-red-400"
                   : hasContent
-                  ? "bg-white hover:bg-white/80 text-[#1F2023]"
+                  ? "bg-[#1e3a8a] hover:bg-[#1e40af] text-white"
                   : "bg-transparent hover:bg-gray-600/30 text-[#9CA3AF] hover:text-[#D1D5DB]"
               )}
               onClick={() => {
@@ -706,13 +732,13 @@ export const PromptInputBox = React.forwardRef((props: PromptInputBoxProps, ref:
               disabled={isLoading && !hasContent}
             >
               {isLoading ? (
-                <Square className="h-4 w-4 fill-[#1F2023] animate-pulse" />
+                <Square className="h-4 w-4 fill-white animate-pulse" />
               ) : isRecording ? (
                 <StopCircle className="h-5 w-5 text-red-500" />
               ) : hasContent ? (
-                <ArrowUp className="h-4 w-4 text-[#1F2023]" />
+                <ArrowUp className="h-4 w-4 text-white" />
               ) : (
-                <Mic className="h-5 w-5 text-[#1F2023] transition-colors" />
+                <Mic className="h-5 w-5 transition-colors" />
               )}
             </Button>
           </PromptInputAction>

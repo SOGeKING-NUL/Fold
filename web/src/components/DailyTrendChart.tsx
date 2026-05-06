@@ -24,7 +24,7 @@ function formatDay(iso: string) {
 export default function DailyTrendChart({ data }: Props) {
   if (!data.length) {
     return (
-      <p className="text-[#999999] text-sm">No trend data for this period.</p>
+      <p className="text-gray-500 text-sm">No trend data for this period.</p>
     );
   }
 
@@ -40,25 +40,25 @@ export default function DailyTrendChart({ data }: Props) {
         <AreaChart data={chartData}>
           <defs>
             <linearGradient id="expGrad" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="5%" stopColor="#ef4444" stopOpacity={0.2} />
+              <stop offset="5%" stopColor="#ef4444" stopOpacity={0.3} />
               <stop offset="95%" stopColor="#ef4444" stopOpacity={0} />
             </linearGradient>
             <linearGradient id="incGrad" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="5%" stopColor="#10b981" stopOpacity={0.2} />
+              <stop offset="5%" stopColor="#10b981" stopOpacity={0.3} />
               <stop offset="95%" stopColor="#10b981" stopOpacity={0} />
             </linearGradient>
           </defs>
-          <CartesianGrid strokeDasharray="3 3" stroke="#e5e5e5" />
+          <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.1)" />
           <XAxis
             dataKey="day"
-            tick={{ fontSize: 11, fill: "#999999" }}
+            tick={{ fontSize: 11, fill: "#9ca3af" }}
             axisLine={false}
             tickLine={false}
             interval="preserveStartEnd"
           />
           <YAxis
             tickFormatter={(v) => formatINR(Number(v))}
-            tick={{ fontSize: 10, fill: "#999999" }}
+            tick={{ fontSize: 10, fill: "#9ca3af" }}
             axisLine={false}
             tickLine={false}
             width={72}
@@ -66,11 +66,11 @@ export default function DailyTrendChart({ data }: Props) {
           <Tooltip
             formatter={(value) => formatINR(Number(value))}
             contentStyle={{
-              backgroundColor: "#ffffff",
-              border: "1px solid #e5e5e5",
+              backgroundColor: "rgba(0,0,0,0.9)",
+              border: "1px solid rgba(255,255,255,0.1)",
               borderRadius: "0.75rem",
               fontSize: "0.75rem",
-              boxShadow: "0 2px 4px rgba(0,0,0,0.05)",
+              color: "#fff",
             }}
           />
           <Area

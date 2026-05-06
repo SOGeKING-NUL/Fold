@@ -30,31 +30,33 @@ export default function SpendVsIncomeChart({ summary }: Props) {
         <BarChart data={data} barCategoryGap="30%">
           <XAxis
             dataKey="name"
-            tick={{ fontSize: 12, fill: "#666666" }}
+            tick={{ fontSize: 12, fill: "#d1d5db" }}
             axisLine={false}
             tickLine={false}
           />
           <YAxis
             tickFormatter={(v) => formatINR(Number(v))}
-            tick={{ fontSize: 10, fill: "#999999" }}
+            tick={{ fontSize: 10, fill: "#9ca3af" }}
             axisLine={false}
             tickLine={false}
             width={80}
           />
           <Tooltip
-            formatter={(value) => formatINR(Number(value))}
+            formatter={(value) => [formatINR(Number(value)), "Amount"]}
+            labelStyle={{ color: "#ffffff" }}
+            itemStyle={{ color: "#ffffff" }}
             contentStyle={{
-              backgroundColor: "#ffffff",
-              border: "1px solid #e5e5e5",
+              backgroundColor: "rgba(0,0,0,0.9)",
+              border: "1px solid rgba(255,255,255,0.1)",
               borderRadius: "0.75rem",
               fontSize: "0.75rem",
-              boxShadow: "0 2px 4px rgba(0,0,0,0.05)",
+              color: "#fff",
             }}
           />
           <Legend
             iconType="circle"
             iconSize={8}
-            wrapperStyle={{ fontSize: "0.75rem", color: "#666666" }}
+            wrapperStyle={{ fontSize: "0.75rem", color: "#d1d5db" }}
           />
           <Bar dataKey="value" radius={[8, 8, 0, 0]}>
             {data.map((entry) => (

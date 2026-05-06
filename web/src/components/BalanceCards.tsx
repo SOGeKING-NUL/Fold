@@ -1,7 +1,7 @@
 "use client";
 
 import { Account } from "@/lib/api";
-import { formatINR, capitalize } from "@/lib/format";
+import { formatINR } from "@/lib/format";
 
 interface Props {
   accounts: Account[];
@@ -13,7 +13,7 @@ export default function BalanceCards({ accounts }: Props) {
   return (
     <section className="animate-in fade-in slide-in-from-top-4 duration-700">
       <div className="flex items-center justify-between mb-4 px-1">
-        <h2 className="text-xs font-semibold text-[#666666] uppercase tracking-widest">
+        <h2 className="text-xs font-semibold text-gray-400 uppercase tracking-widest">
           Your Balances
         </h2>
       </div>
@@ -21,15 +21,15 @@ export default function BalanceCards({ accounts }: Props) {
         {accounts.map((a) => (
           <div 
             key={a.id} 
-            className="p-5 flex flex-col gap-1.5 rounded-2xl border border-[#d0d0d0] bg-gradient-to-br from-[#f8f8f8] to-[#ececec] shadow-sm hover:shadow-md hover:border-[#156d95] transition-all duration-300 group"
+            className="p-5 flex flex-col gap-1.5 rounded-2xl border border-white/10 bg-white/5 backdrop-blur-sm shadow-lg hover:bg-white/[0.07] hover:border-white/20 transition-all duration-300 group"
           >
-            <span className="text-[10px] text-[#999999] uppercase tracking-wider font-medium group-hover:text-[#156d95] transition-colors">
+            <span className="text-[10px] text-gray-400 uppercase tracking-wider font-medium group-hover:text-gray-300 transition-colors">
               {a.account_type}
             </span>
-            <span className="text-lg font-bold text-[#202020] tabular-nums tracking-tight">
+            <span className="text-lg font-bold text-white tabular-nums tracking-tight">
               {formatINR(a.balance)}
             </span>
-            <span className="text-xs text-[#666666] truncate font-medium">
+            <span className="text-xs text-gray-400 truncate font-medium">
               {a.name}
             </span>
           </div>
