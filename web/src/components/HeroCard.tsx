@@ -3,6 +3,7 @@ import { motion } from "framer-motion"
 import Link from "next/link"
 import Image from "next/image"
 import { Marquee } from "@/components/ui/marquee"
+import { AsciiWave } from "./ui/AsciiWave"
 
 type ProductTeaserCardProps = {
   headline?: string
@@ -35,10 +36,7 @@ export const HeroCard = (props: ProductTeaserCardProps) => {
   ]
 
   return (
-    <section className="w-full px-6 md:px-12 pt-32 pb-24 bg-transparent relative">
-      <div className="pointer-events-none absolute -top-20 left-1/2 h-96 w-96 -translate-x-1/2 rounded-full bg-blue-500/10 blur-3xl" />
-    <div className="pointer-events-none absolute -bottom-40 -right-24 h-96 w-96 rounded-full bg-blue-400/10 blur-3xl" />
-
+    <section className="w-full px-6 md:px-12 pt-32 pb-24 bg-transparent relative overflow-hidden">
       <div className="max-w-350 mx-auto">
         <motion.div
           initial={{ opacity: 0, y: 40 }}
@@ -136,13 +134,6 @@ export const HeroCard = (props: ProductTeaserCardProps) => {
             className="relative z-10"
           >
             <div className="relative w-full aspect-video bg-white/5 backdrop-blur-sm rounded-[40px] overflow-hidden shadow-2xl border border-white/10">
-              <div className="absolute inset-0 bg-linear-to-r from-transparent via-blue-400/10 to-transparent animate-shimmer"
-                style={{
-                  backgroundSize: '200% 100%',
-                  animation: 'shimmer 3s infinite'
-                }}
-              />
-
               {videoSrc ? (
                 <video
                   src={videoSrc}
@@ -154,50 +145,32 @@ export const HeroCard = (props: ProductTeaserCardProps) => {
                   className="w-full h-full object-cover"
                 />
               ) : (
-                <div className="w-full h-full flex items-center justify-center relative">
-                  <div className="absolute inset-0 opacity-10">
+                <div className="w-full h-full flex items-center justify-center relative bg-linear-to-br from-gray-900/50 to-gray-800/30">
+                  <div className="absolute inset-0 opacity-5">
                     <div className="w-full h-full" style={{
                       backgroundImage: `
-                        linear-gradient(rgba(96, 165, 250, 0.25) 1px, transparent 1px),
-                        linear-gradient(90deg, rgba(96, 165, 250, 0.25) 1px, transparent 1px)
+                        linear-gradient(rgba(255, 255, 255, 0.1) 1px, transparent 1px),
+                        linear-gradient(90deg, rgba(255, 255, 255, 0.1) 1px, transparent 1px)
                       `,
-                      backgroundSize: '30px 30px'
+                      backgroundSize: '40px 40px'
                     }} />
                   </div>
 
-                  <motion.div
-                    animate={{
-                      y: [0, -20, 0],
-                      opacity: [0.3, 0.6, 0.3]
-                    }}
-                    transition={{
-                      duration: 3,
-                      repeat: Infinity,
-                      ease: "easeInOut"
-                    }}
-                    className="absolute top-1/4 left-1/4 w-16 h-16 rounded-full bg-blue-400/20 blur-xl"
-                  />
-                  <motion.div
-                    animate={{
-                      y: [0, 20, 0],
-                      opacity: [0.3, 0.6, 0.3]
-                    }}
-                    transition={{
-                      duration: 4,
-                      repeat: Infinity,
-                      ease: "easeInOut",
-                      delay: 1
-                    }}
-                    className="absolute bottom-1/4 right-1/4 w-20 h-20 rounded-full bg-blue-500/20 blur-xl"
-                  />
-
-                  <div className="relative z-10 text-center">
-                    <div className="text-gray-400 text-sm mb-4">Demo Coming Soon</div>
-                    <div className="flex gap-2 justify-center">
-                      <div className="w-2 h-2 rounded-full bg-gray-400 animate-pulse" />
-                      <div className="w-2 h-2 rounded-full bg-gray-400 animate-pulse delay-150" />
-                      <div className="w-2 h-2 rounded-full bg-gray-400 animate-pulse delay-300" />
-                    </div>
+                  <div className="relative z-10 text-center space-y-4">
+                    <svg 
+                      className="w-16 h-16 mx-auto text-gray-600" 
+                      fill="none" 
+                      viewBox="0 0 24 24" 
+                      stroke="currentColor"
+                    >
+                      <path 
+                        strokeLinecap="round" 
+                        strokeLinejoin="round" 
+                        strokeWidth={1.5} 
+                        d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" 
+                      />
+                    </svg>
+                    <div className="text-gray-500 text-sm">Demo video coming soon</div>
                   </div>
                 </div>
               )}
@@ -293,24 +266,11 @@ export const HeroCard = (props: ProductTeaserCardProps) => {
       </div>
 
       <style jsx>{`
-        @keyframes shimmer {
-          0% { background-position: -200% 0; }
-          100% { background-position: 200% 0; }
-        }
-        .animate-shimmer {
-          animation: shimmer 3s infinite;
-        }
         .delay-150 {
           animation-delay: 150ms;
         }
         .delay-300 {
           animation-delay: 300ms;
-        }
-        .delay-1000 {
-          animation-delay: 1000ms;
-        }
-        .delay-2000 {
-          animation-delay: 2000ms;
         }
       `}</style>
     </section>
