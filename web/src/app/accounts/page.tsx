@@ -1,8 +1,8 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import { useRouter } from "next/navigation";
-import { useAuth, UserButton } from "@clerk/nextjs";
+import { useState, useEffect, useCallback } from "react";
+import { useAuth } from "@clerk/nextjs";
+import { OrbitalLoader } from "@/components/ui/OrbitalLoader";
 
 interface Account {
   id: number;
@@ -22,7 +22,6 @@ interface PaymentProfile {
 }
 
 export default function AccountsPage() {
-  const router = useRouter();
   const { getToken, isLoaded, isSignedIn } = useAuth();
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [profiles, setProfiles] = useState<PaymentProfile[]>([]);
@@ -31,7 +30,7 @@ export default function AccountsPage() {
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [editingAccount, setEditingAccount] = useState<Account | null>(null);
 
-  const fetchAccounts = async () => {
+  const fetchAccounts = useCallback(async () => {
     try {
       const token = await getToken();
       if (!token) return;
@@ -65,18 +64,18 @@ export default function AccountsPage() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [getToken]);
 
   useEffect(() => {
     if (isLoaded && isSignedIn) {
       fetchAccounts();
     }
-  }, [isLoaded, isSignedIn]);
+  }, [isLoaded, isSignedIn, fetchAccounts]);
 
   if (!isLoaded || loading) {
     return (
-      <div className="min-h-screen bg-white flex items-center justify-center">
-        <div className="text-[#202020]">Loading...</div>
+      <div className="min-h-screen bg-linear-to-br from-black via-gray-900 to-black flex items-center justify-center">
+        <OrbitalLoader message="Loading accounts..." />
       </div>
     );
   }
@@ -97,14 +96,14 @@ export default function AccountsPage() {
   };
 
   return (
-    <div className="min-h-screen bg-white font-sans">
+    <div className="min-h-screen bg-linear-to-br from-black via-gray-900 to-black font-sans">
       <main className="max-w-4xl mx-auto px-4 py-8 mt-16">
         {!isFormOpen && (
           <div className="mb-6 flex justify-between items-center">
-            <h2 className="text-lg text-[#202020]">Your Accounts</h2>
+            <h2 className="text-lg text-white">Your Accounts</h2>
             <button
               onClick={handleOpenAdd}
-              className="px-5 py-2.5 bg-[#156d95] hover:bg-[#146e96] text-white rounded-xl font-medium transition-colors flex items-center gap-2 cursor-pointer"
+              className="px-5 py-2.5 bg-[#1e3a8a] hover:bg-[#1e40af] text-white rounded-xl font-medium transition-colors flex items-center gap-2 cursor-pointer"
             >
               <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
@@ -130,8 +129,8 @@ export default function AccountsPage() {
             <div className="space-y-4 mb-12">
               {accounts.length === 0 ? (
                 <div className="text-center py-12">
-                  <p className="text-[#666666] mb-4">No accounts added yet.</p>
-                  <button onClick={handleOpenAdd} className="text-[#156d95] hover:text-[#146e96] transition-colors cursor-pointer">
+                  <p className="text-gray-400 mb-4">No accounts added yet.</p>
+                  <button onClick={handleOpenAdd} className="text-blue-400 hover:text-blue-300 transition-colors cursor-pointer">
                     Setup your first account
                   </button>
                 </div>
@@ -143,7 +142,7 @@ export default function AccountsPage() {
             </div>
 
             <div className="mb-6 flex justify-between items-center">
-              <h2 className="text-lg text-[#202020]">Linked Payment Apps (UPI)</h2>
+              <h2 className="text-lg text-white">Linked Payment Apps (UPI)</h2>
             </div>
             
             <PaymentProfilesSection profiles={profiles} accounts={accounts} onRefresh={fetchAccounts} />
@@ -203,14 +202,14 @@ function PaymentProfilesSection({ profiles, accounts, onRefresh }: { profiles: P
   return (
     <div className="space-y-4">
       {profiles.map(p => (
-        <div key={p.id} className="p-4 bg-gradient-to-br from-[#f8f8f8] to-[#ececec] border border-[#d0d0d0] rounded-2xl flex justify-between items-center hover:border-[#156d95] hover:shadow-md transition-all duration-300">
+        <div key={p.id} className="p-4 bg-white/5 backdrop-blur-sm border border-white/10 rounded-2xl flex justify-between items-center hover:bg-white/[0.07] hover:border-white/20 transition-all duration-300 shadow-lg">
           <div>
-            <h3 className="text-[#202020] font-medium capitalize">{p.provider}</h3>
-            <p className="text-sm text-[#666666]">{p.profile_name}</p>
+            <h3 className="text-white font-medium capitalize">{p.provider}</h3>
+            <p className="text-sm text-gray-400">{p.profile_name}</p>
           </div>
           <div className="text-right">
-            <span className="text-xs text-[#666666] block mb-1">Linked to</span>
-            <span className="px-2 py-1 bg-[#156d95]/10 text-[#156d95] rounded text-xs border border-[#156d95]/20">
+            <span className="text-xs text-gray-400 block mb-1">Linked to</span>
+            <span className="px-2 py-1 bg-blue-500/10 text-blue-400 rounded text-xs border border-blue-500/20">
               {p.linked_account_name}
             </span>
           </div>
@@ -220,7 +219,7 @@ function PaymentProfilesSection({ profiles, accounts, onRefresh }: { profiles: P
       {!isLinking ? (
         <button
           onClick={() => setIsLinking(true)}
-          className="w-full p-4 border border-dashed border-[#d0d0d0] rounded-2xl text-[#666666] hover:text-[#202020] hover:border-[#156d95] hover:bg-gradient-to-br hover:from-[#f8f8f8] hover:to-[#ececec] transition-all duration-300 flex items-center justify-center gap-2 cursor-pointer"
+          className="w-full p-4 border border-dashed border-white/10 rounded-2xl text-gray-400 hover:text-white hover:border-white/20 hover:bg-white/5 transition-all duration-300 flex items-center justify-center gap-2 cursor-pointer"
         >
           <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
@@ -228,14 +227,14 @@ function PaymentProfilesSection({ profiles, accounts, onRefresh }: { profiles: P
           Link UPI / Payment App
         </button>
       ) : (
-        <form onSubmit={handleLink} className="p-5 bg-gradient-to-br from-[#f8f8f8] to-[#ececec] border border-[#d0d0d0] rounded-2xl space-y-4">
+        <form onSubmit={handleLink} className="p-5 bg-white/5 backdrop-blur-sm border border-white/10 rounded-2xl space-y-4 shadow-lg">
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
             <div>
-              <label className="block text-xs text-[#666666] mb-1">Provider</label>
+              <label className="block text-xs text-[#6b7280] mb-1">Provider</label>
               <select
                 value={provider}
                 onChange={e => setProvider(e.target.value)}
-                className="w-full px-3 py-2 bg-white border border-[#e5e5e5] rounded-lg text-[#202020] focus:outline-none focus:border-[#156d95]"
+                className="w-full px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-white focus:outline-none focus:border-blue-500 [&>option]:bg-gray-900 [&>option]:text-white"
               >
                 <option value="gpay">Google Pay</option>
                 <option value="phonepe">PhonePe</option>
@@ -247,22 +246,22 @@ function PaymentProfilesSection({ profiles, accounts, onRefresh }: { profiles: P
               </select>
             </div>
             <div>
-              <label className="block text-xs text-[#666666] mb-1">Profile Name</label>
+              <label className="block text-xs text-gray-400 mb-1">Profile Name</label>
               <input
                 type="text"
                 value={profileName}
                 onChange={e => setProfileName(e.target.value)}
                 placeholder="e.g. Personal GPay"
-                className="w-full px-3 py-2 bg-white border border-[#e5e5e5] rounded-lg text-[#202020] focus:outline-none focus:border-[#156d95]"
+                className="w-full px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-white focus:outline-none focus:border-blue-500"
               />
             </div>
             <div>
-              <label className="block text-xs text-[#666666] mb-1">Link to Bank Account</label>
+              <label className="block text-xs text-gray-400 mb-1">Link to Bank Account</label>
               <select
                 required
                 value={linkedAccount}
                 onChange={e => setLinkedAccount(e.target.value)}
-                className="w-full px-3 py-2 bg-white border border-[#e5e5e5] rounded-lg text-[#202020] focus:outline-none focus:border-[#156d95]"
+                className="w-full px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-white focus:outline-none focus:border-blue-500 [&>option]:bg-gray-900 [&>option]:text-white"
               >
                 <option value="">Select Account...</option>
                 {accounts.filter(a => a.account_type === "bank").map(a => (
@@ -272,10 +271,10 @@ function PaymentProfilesSection({ profiles, accounts, onRefresh }: { profiles: P
             </div>
           </div>
           <div className="flex gap-3 justify-end">
-            <button type="button" onClick={() => setIsLinking(false)} className="px-4 py-2 bg-[#f5f5f5] hover:bg-[#e5e5e5] text-[#202020] rounded-lg text-sm font-medium transition-colors cursor-pointer">
+            <button type="button" onClick={() => setIsLinking(false)} className="px-4 py-2 bg-white/10 hover:bg-white/20 text-white rounded-lg text-sm font-medium transition-colors cursor-pointer border border-white/10">
               Cancel
             </button>
-            <button type="submit" className="px-4 py-2 bg-[#156d95] hover:bg-[#146e96] text-white rounded-lg text-sm font-medium transition-colors cursor-pointer">
+            <button type="submit" className="px-4 py-2 bg-[#1e3a8a] hover:bg-[#1e40af] text-white rounded-lg text-sm font-medium transition-colors cursor-pointer">
               Link App
             </button>
           </div>
@@ -325,9 +324,10 @@ function AccountCard({ account, onEdit, onRefresh }: { account: Account; onEdit:
       setIsAddingFunds(false);
       setFundAmount("");
       onRefresh();
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error(err);
-      alert(err.message || "Failed to add funds.");
+      const message = err instanceof Error ? err.message : "Failed to add funds.";
+      alert(message);
     }
   };
 
@@ -355,37 +355,38 @@ function AccountCard({ account, onEdit, onRefresh }: { account: Account; onEdit:
       }
       
       onRefresh();
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error(err);
-      alert(err.message || "Failed to set as default.");
+      const message = err instanceof Error ? err.message : "Failed to set as default.";
+      alert(message);
     }
   };
 
   const typeColors: Record<string, string> = {
-    cash: "bg-green-500/10 text-green-600 border-green-500/20",
-    bank: "bg-[#156d95]/10 text-[#156d95] border-[#156d95]/20",
-    credit: "bg-purple-500/10 text-purple-600 border-purple-500/20",
+    cash: "bg-green-500/10 text-green-400 border-green-500/20",
+    bank: "bg-blue-500/10 text-blue-400 border-blue-500/20",
+    credit: "bg-purple-500/10 text-purple-400 border-purple-500/20",
   };
 
   const balance = account.balance !== undefined ? account.balance / 100 : 0;
   const isNegative = balance < 0;
 
   return (
-    <div className="p-5 bg-gradient-to-br from-[#f8f8f8] to-[#ececec] border border-[#d0d0d0] rounded-2xl hover:border-[#156d95] hover:shadow-md transition-all duration-300">
+    <div className="p-5 bg-white/5 backdrop-blur-sm border border-white/10 rounded-2xl hover:bg-white/[0.07] hover:border-white/20 transition-all duration-300 shadow-lg">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div className="flex-1">
           <div className="flex items-center gap-3 mb-2">
-            <h3 className="text-lg font-semibold text-[#202020]">{account.name}</h3>
+            <h3 className="text-lg font-semibold text-white">{account.name}</h3>
             <span className={`px-2 py-1 rounded-md text-xs font-medium border ${typeColors[account.account_type] || typeColors.asset}`}>
               {account.account_type.charAt(0).toUpperCase() + account.account_type.slice(1)}
             </span>
             {account.is_default && (
-              <span className="px-2 py-1 rounded-md text-xs font-medium bg-yellow-500/10 text-yellow-600 border border-yellow-500/20">
+              <span className="px-2 py-1 rounded-md text-xs font-medium bg-yellow-500/10 text-yellow-400 border border-yellow-500/20">
                 Default
               </span>
             )}
           </div>
-          <div className="flex flex-wrap items-center gap-3 text-sm text-[#666666]">
+          <div className="flex flex-wrap items-center gap-3 text-sm text-gray-400">
             {account.institution_name && account.account_type !== "cash" && <span>{account.institution_name}</span>}
             {account.account_number_last4 && <span>•••• {account.account_number_last4}</span>}
           </div>
@@ -394,26 +395,26 @@ function AccountCard({ account, onEdit, onRefresh }: { account: Account; onEdit:
         <div className="flex flex-col items-start sm:items-end gap-3">
           {account.balance !== undefined && (
             <div className="text-left sm:text-right">
-              <div className={`text-2xl font-bold ${isNegative ? 'text-red-500' : 'text-[#202020]'}`}>
+              <div className={`text-2xl font-bold ${isNegative ? 'text-red-400' : 'text-white'}`}>
                 ₹{balance.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
               </div>
-              <div className="text-xs text-[#666666] uppercase tracking-wider">Current Balance</div>
+              <div className="text-xs text-gray-400 uppercase tracking-wider">Current Balance</div>
             </div>
           )}
           <div className="flex items-center gap-2 flex-wrap">
             {!account.is_default && (
               <button 
                 onClick={handleSetDefault} 
-                className="text-xs px-3 py-1.5 bg-yellow-500/10 hover:bg-yellow-500/20 text-yellow-600 border border-yellow-500/20 rounded-lg transition-colors cursor-pointer"
+                className="text-xs px-3 py-1.5 bg-yellow-500/10 hover:bg-yellow-500/20 text-yellow-400 border border-yellow-500/20 rounded-lg transition-colors cursor-pointer"
               >
                 Set as Default
               </button>
             )}
-            <button onClick={onEdit} className="text-xs px-3 py-1.5 bg-[#f5f5f5] hover:bg-[#e5e5e5] text-[#202020] rounded-lg transition-colors cursor-pointer">
+            <button onClick={onEdit} className="text-xs px-3 py-1.5 bg-white/10 hover:bg-white/20 text-white rounded-lg transition-colors cursor-pointer border border-white/10">
               Edit
             </button>
             {account.account_type !== "credit" && !isAddingFunds && (
-              <button onClick={() => setIsAddingFunds(true)} className="text-xs px-3 py-1.5 bg-[#156d95] hover:bg-[#146e96] text-white rounded-lg transition-colors cursor-pointer">
+              <button onClick={() => setIsAddingFunds(true)} className="text-xs px-3 py-1.5 bg-[#1e3a8a] hover:bg-[#1e40af] text-white rounded-lg transition-colors cursor-pointer">
                 Add Funds
               </button>
             )}
@@ -422,9 +423,9 @@ function AccountCard({ account, onEdit, onRefresh }: { account: Account; onEdit:
       </div>
 
       {isAddingFunds && (
-        <form onSubmit={handleAddFunds} className="mt-4 p-4 bg-white rounded-xl border border-[#e5e5e5] flex items-end gap-3">
+        <form onSubmit={handleAddFunds} className="mt-4 p-4 bg-black/30 rounded-xl border border-white/10 flex items-end gap-3">
           <div className="flex-1 max-w-xs">
-            <label className="block text-xs text-[#666666] mb-1">Amount to Add (₹)</label>
+            <label className="block text-xs text-gray-400 mb-1">Amount to Add (₹)</label>
             <input
               type="number"
               step="0.01"
@@ -432,14 +433,14 @@ function AccountCard({ account, onEdit, onRefresh }: { account: Account; onEdit:
               required
               value={fundAmount}
               onChange={(e) => setFundAmount(e.target.value)}
-              className="w-full px-3 py-2 bg-white border border-[#e5e5e5] rounded-lg text-[#202020] focus:outline-none focus:border-[#156d95]"
+              className="w-full px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-white focus:outline-none focus:border-blue-500"
               placeholder="e.g. 5000"
             />
           </div>
-          <button type="submit" className="px-4 py-2 bg-green-500 hover:bg-green-600 text-white rounded-lg font-medium transition-colors cursor-pointer">
+          <button type="submit" className="px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg font-medium transition-colors cursor-pointer">
             Confirm
           </button>
-          <button type="button" onClick={() => setIsAddingFunds(false)} className="px-4 py-2 bg-[#f5f5f5] hover:bg-[#e5e5e5] text-[#202020] rounded-lg font-medium transition-colors cursor-pointer">
+          <button type="button" onClick={() => setIsAddingFunds(false)} className="px-4 py-2 bg-white/10 hover:bg-white/20 text-white rounded-lg font-medium transition-colors cursor-pointer border border-white/10">
             Cancel
           </button>
         </form>
@@ -518,29 +519,30 @@ function AccountForm({ initialData, onClose, onSuccess }: { initialData: Account
       }
 
       onSuccess();
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error(error);
-      alert(error.message || "An error occurred while saving the account.");
+      const message = error instanceof Error ? error.message : "An error occurred while saving the account.";
+      alert(message);
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <div className="p-6 bg-gradient-to-br from-[#f8f8f8] to-[#ececec] border border-[#d0d0d0] rounded-2xl shadow-sm">
-      <h2 className="text-xl font-bold text-[#202020] mb-6">
+    <div className="p-6 bg-white/5 backdrop-blur-sm border border-white/10 rounded-2xl shadow-lg">
+      <h2 className="text-xl font-bold text-white mb-6">
         {isEditing ? "Edit Account" : "Add New Account"}
       </h2>
       
       <form onSubmit={handleSubmit} className="space-y-5">
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
           <div>
-            <label className="block text-sm font-medium text-[#202020] mb-2">Account Type</label>
+            <label className="block text-sm font-medium text-white mb-2">Account Type</label>
             <select
               value={formData.account_type}
               onChange={(e) => setFormData({ ...formData, account_type: e.target.value })}
-              className="w-full px-4 py-2.5 bg-white border border-[#e5e5e5] rounded-xl text-[#202020] focus:outline-none focus:border-[#156d95]"
-              disabled={isEditing} // Cannot change type easily after creation
+              className="w-full px-4 py-2.5 bg-white/5 border border-white/10 rounded-xl text-white focus:outline-none focus:border-blue-500 [&>option]:bg-gray-900 [&>option]:text-white"
+              disabled={isEditing}
             >
               <option value="bank">Bank Account</option>
               <option value="cash">Cash Wallet</option>
@@ -549,7 +551,7 @@ function AccountForm({ initialData, onClose, onSuccess }: { initialData: Account
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-[#202020] mb-2">
+            <label className="block text-sm font-medium text-white mb-2">
               {formData.account_type === "cash" ? "Nickname (Optional)" : "Account Name *"}
             </label>
             <input
@@ -562,32 +564,32 @@ function AccountForm({ initialData, onClose, onSuccess }: { initialData: Account
                   ? "e.g. My Cash, Wallet" 
                   : "e.g. HDFC Checking, ICICI Credit"
               }
-              className="w-full px-4 py-2.5 bg-white border border-[#e5e5e5] rounded-xl text-[#202020] focus:outline-none focus:border-[#156d95]"
+              className="w-full px-4 py-2.5 bg-white/5 border border-white/10 rounded-xl text-white focus:outline-none focus:border-blue-500"
             />
           </div>
 
           {formData.account_type !== "cash" && (
             <>
               <div>
-                <label className="block text-sm font-medium text-[#202020] mb-2">Institution (Optional)</label>
+                <label className="block text-sm font-medium text-white mb-2">Institution (Optional)</label>
                 <input
                   type="text"
                   value={formData.institution_name}
                   onChange={(e) => setFormData({ ...formData, institution_name: e.target.value })}
                   placeholder="e.g. HDFC, ICICI, Paytm"
-                  className="w-full px-4 py-2.5 bg-white border border-[#e5e5e5] rounded-xl text-[#202020] focus:outline-none focus:border-[#156d95]"
+                  className="w-full px-4 py-2.5 bg-white/5 border border-white/10 rounded-xl text-white focus:outline-none focus:border-blue-500"
                 />
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-[#202020] mb-2">Last 4 Digits (Optional)</label>
+                <label className="block text-sm font-medium text-white mb-2">Last 4 Digits (Optional)</label>
                 <input
                   type="text"
                   maxLength={4}
                   value={formData.account_number_last4}
                   onChange={(e) => setFormData({ ...formData, account_number_last4: e.target.value.replace(/\D/g, '') })}
                   placeholder="e.g. 1234"
-                  className="w-full px-4 py-2.5 bg-white border border-[#e5e5e5] rounded-xl text-[#202020] focus:outline-none focus:border-[#156d95]"
+                  className="w-full px-4 py-2.5 bg-white/5 border border-white/10 rounded-xl text-white focus:outline-none focus:border-blue-500"
                 />
               </div>
             </>
@@ -596,7 +598,7 @@ function AccountForm({ initialData, onClose, onSuccess }: { initialData: Account
 
         {!isEditing && formData.account_type !== "credit" && (
           <div>
-            <label className="block text-sm font-medium text-[#202020] mb-2">
+            <label className="block text-sm font-medium text-white mb-2">
               {formData.account_type === "cash" ? "Current Cash Amount (₹)" : "Initial Balance / Opening Amount (₹)"}
             </label>
             <input
@@ -606,9 +608,9 @@ function AccountForm({ initialData, onClose, onSuccess }: { initialData: Account
               value={formData.initial_amount}
               onChange={(e) => setFormData({ ...formData, initial_amount: e.target.value })}
               placeholder="e.g. 5000"
-              className="w-full px-4 py-2.5 bg-white border border-[#e5e5e5] rounded-xl text-[#202020] focus:outline-none focus:border-[#156d95] max-w-sm"
+              className="w-full px-4 py-2.5 bg-white/5 border border-white/10 rounded-xl text-white focus:outline-none focus:border-blue-500 max-w-sm"
             />
-            <p className="text-xs text-[#666666] mt-2">
+            <p className="text-xs text-gray-400 mt-2">
               {formData.account_type === "cash" 
                 ? "How much cash do you currently have?" 
                 : "Optional. You can also add funds later."}
@@ -616,18 +618,18 @@ function AccountForm({ initialData, onClose, onSuccess }: { initialData: Account
           </div>
         )}
 
-        <div className="flex gap-4 pt-4 border-t border-[#e5e5e5]">
+        <div className="flex gap-4 pt-4 border-t border-white/10">
           <button
             type="submit"
             disabled={loading}
-            className="px-6 py-2.5 bg-[#156d95] hover:bg-[#146e96] disabled:opacity-50 text-white rounded-xl font-medium transition-colors cursor-pointer"
+            className="px-6 py-2.5 bg-[#1e3a8a] hover:bg-[#1e40af] disabled:opacity-50 text-white rounded-xl font-medium transition-colors cursor-pointer"
           >
             {loading ? "Saving..." : isEditing ? "Save Changes" : "Create Account"}
           </button>
           <button
             type="button"
             onClick={onClose}
-            className="px-6 py-2.5 bg-[#f5f5f5] hover:bg-[#e5e5e5] text-[#202020] rounded-xl font-medium transition-colors cursor-pointer"
+            className="px-6 py-2.5 bg-white/10 hover:bg-white/20 text-white rounded-xl font-medium transition-colors cursor-pointer border border-white/10"
           >
             Cancel
           </button>

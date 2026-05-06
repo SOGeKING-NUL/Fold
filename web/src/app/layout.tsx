@@ -2,6 +2,19 @@ import type { Metadata } from "next";
 import { ClerkProvider } from "@clerk/nextjs";
 import "./globals.css";
 import { Navbar } from "@/components/Navbar";
+import { Plus_Jakarta_Sans, JetBrains_Mono } from "next/font/google";
+
+const sans = Plus_Jakarta_Sans({
+  subsets: ["latin"],
+  display: "swap",
+  variable: "--font-sans",
+});
+
+const mono = JetBrains_Mono({
+  subsets: ["latin"],
+  display: "swap",
+  variable: "--font-mono",
+});
 
 export const metadata: Metadata = {
   title: "Fold AI - Financial Assistant",
@@ -15,8 +28,8 @@ export default function RootLayout({
 }>) {
   return (
     <ClerkProvider>
-      <html lang="en" className="h-full antialiased">
-        <body className="min-h-full flex flex-col bg-white" style={{ fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", system-ui, sans-serif' }}>
+      <html lang="en" className={`${sans.variable} ${mono.variable} h-full antialiased`}>
+        <body className="min-h-full flex flex-col font-sans">
           <Navbar />
           {children}
         </body>

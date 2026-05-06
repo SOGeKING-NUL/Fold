@@ -4,39 +4,39 @@
 @custom-variant dark (&:is(.dark *));
 
 :root {
-  --background: oklch(1 0 0);
-  --foreground: oklch(0.145 0 0);
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.145 0 0);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.145 0 0);
-  --primary: oklch(0.205 0 0);
-  --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.97 0 0);
-  --secondary-foreground: oklch(0.205 0 0);
-  --muted: oklch(0.97 0 0);
-  --muted-foreground: oklch(0.556 0 0);
-  --accent: oklch(0.97 0 0);
-  --accent-foreground: oklch(0.205 0 0);
-  --destructive: oklch(0.577 0.245 27.325);
-  --destructive-foreground: oklch(0.577 0.245 27.325);
-  --border: oklch(0.922 0 0);
-  --input: oklch(0.922 0 0);
-  --ring: oklch(0.708 0 0);
-  --chart-1: oklch(0.646 0.222 41.116);
-  --chart-2: oklch(0.6 0.118 184.704);
-  --chart-3: oklch(0.398 0.07 227.392);
-  --chart-4: oklch(0.828 0.189 84.429);
-  --chart-5: oklch(0.769 0.188 70.08);
+  --background: oklch(0.12 0.015 240);
+  --foreground: oklch(0.95 0.005 240);
+  --card: oklch(0.15 0.015 240);
+  --card-foreground: oklch(0.95 0.005 240);
+  --popover: oklch(0.15 0.015 240);
+  --popover-foreground: oklch(0.95 0.005 240);
+  --primary: oklch(0.55 0.15 220);
+  --primary-foreground: oklch(0.98 0.005 240);
+  --secondary: oklch(0.2 0.015 240);
+  --secondary-foreground: oklch(0.95 0.005 240);
+  --muted: oklch(0.18 0.015 240);
+  --muted-foreground: oklch(0.6 0.01 240);
+  --accent: oklch(0.2 0.015 240);
+  --accent-foreground: oklch(0.95 0.005 240);
+  --destructive: oklch(0.5 0.2 25);
+  --destructive-foreground: oklch(0.95 0.005 240);
+  --border: oklch(0.22 0.015 240);
+  --input: oklch(0.2 0.015 240);
+  --ring: oklch(0.55 0.15 220);
+  --chart-1: oklch(0.55 0.15 220);
+  --chart-2: oklch(0.6 0.15 180);
+  --chart-3: oklch(0.65 0.15 280);
+  --chart-4: oklch(0.7 0.15 140);
+  --chart-5: oklch(0.6 0.15 60);
   --radius: 0.625rem;
-  --sidebar: oklch(0.985 0 0);
-  --sidebar-foreground: oklch(0.145 0 0);
-  --sidebar-primary: oklch(0.205 0 0);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.97 0 0);
-  --sidebar-accent-foreground: oklch(0.205 0 0);
-  --sidebar-border: oklch(0.922 0 0);
-  --sidebar-ring: oklch(0.708 0 0);
+  --sidebar: oklch(0.15 0.015 240);
+  --sidebar-foreground: oklch(0.95 0.005 240);
+  --sidebar-primary: oklch(0.55 0.15 220);
+  --sidebar-primary-foreground: oklch(0.98 0.005 240);
+  --sidebar-accent: oklch(0.2 0.015 240);
+  --sidebar-accent-foreground: oklch(0.95 0.005 240);
+  --sidebar-border: oklch(0.22 0.015 240);
+  --sidebar-ring: oklch(0.55 0.15 220);
 }
 
 .dark {
@@ -75,10 +75,9 @@
 }
 
 @theme inline {
-  /* San Francisco font system */
-  --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", system-ui, sans-serif;
-  --font-figtree: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", system-ui, sans-serif;
-  --font-mono: "SF Mono", ui-monospace, monospace;
+  /* App typography (wired via next/font variables in layout.tsx) */
+  --font-sans: var(--font-sans), ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", "Apple Color Emoji", "Segoe UI Emoji";
+  --font-mono: var(--font-mono), ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --color-card: var(--card);
@@ -127,18 +126,22 @@
   }
   
   body {
-    /* San Francisco font style: clean typography */
-    @apply bg-white text-black antialiased;
-    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", system-ui, sans-serif;
-    font-weight: 400;
-    font-size: 17px;
-    line-height: 1.6;
-    -webkit-font-smoothing: antialiased;
-    -moz-osx-font-smoothing: grayscale;
+    @apply bg-linear-to-br from-black via-gray-900 to-black text-white antialiased font-sans;
+    font-weight: 450;
+    font-size: 16px;
+    line-height: 1.65;
   }
   
   h1, h2, h3, h4, h5, h6 {
     @apply font-light tracking-tight;
+  }
+
+  :where(a, button, input, textarea, select, summary) {
+    @apply focus-visible:outline-none;
+  }
+
+  :where(a, button, input, textarea, select, summary):focus-visible {
+    @apply ring-2 ring-[#1e3a8a]/60 ring-offset-2 ring-offset-black;
   }
   
   /* Smooth scrolling for anchor links */

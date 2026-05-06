@@ -6,6 +6,7 @@ import { Transaction, Account, getTransactions, getDashboard } from "@/lib/api";
 import TransactionTable from "@/components/TransactionTable";
 import BalanceCards from "@/components/BalanceCards";
 import { useAuth } from "@clerk/nextjs";
+import { OrbitalLoader } from "@/components/ui/OrbitalLoader";
 
 const PAGE_SIZE = 50;
 
@@ -56,14 +57,13 @@ export default function TransactionsPage() {
   }, [fetchPage]);
 
   return (
-    <div className="min-h-screen bg-white font-sans">
+    <div className="min-h-screen font-sans bg-linear-to-br from-black via-gray-900 to-black">
       <main className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-8 pb-16 space-y-10 mt-16">
         <BalanceCards accounts={accounts} />
 
       {loading && transactions.length === 0 ? (
-        <div className="flex flex-col items-center justify-center py-20 gap-3">
-          <div className="w-10 h-10 border-4 border-[#f5f5f5] border-t-[#156d95] rounded-full animate-spin" />
-          <span className="text-[#666666] text-sm animate-pulse">Fetching transactions...</span>
+        <div className="flex flex-col items-center justify-center py-20">
+          <OrbitalLoader message="Fetching transactions..." />
         </div>
       ) : (
         <TransactionTable transactions={transactions} />
@@ -74,7 +74,7 @@ export default function TransactionsPage() {
           <button
             onClick={() => fetchPage(offset, true)}
             disabled={loading}
-            className="px-8 py-3 bg-[#fafafa] border border-[#e5e5e5] hover:bg-white text-[#202020] rounded-2xl text-sm font-semibold transition-all duration-300 disabled:opacity-50 hover:scale-[1.02] active:scale-[0.98] cursor-pointer"
+            className="px-8 py-3 bg-[#1e3a8a] hover:bg-[#1e40af] text-white rounded-2xl text-sm font-semibold transition-all duration-300 disabled:opacity-50 hover:scale-[1.02] active:scale-[0.98] cursor-pointer"
           >
             {loading ? "Loading more..." : "Show older transactions"}
           </button>
