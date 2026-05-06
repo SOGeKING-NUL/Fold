@@ -250,7 +250,7 @@ export default function AccountsPage() {
                   ) : (
                     <>
                       {cardAccounts.length > 0 && (
-                        <div className="mb-8">
+                        <div className="mb-8">  
                           <h3 className="text-lg font-semibold text-white mb-4">Featured Card</h3>
                           <div className="relative">
                             <div className="flex items-center justify-center">

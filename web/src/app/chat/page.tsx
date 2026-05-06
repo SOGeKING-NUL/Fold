@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useAuth } from "@clerk/nextjs";
 import { PromptInputBox } from "@/components/ui/ai-prompt-box";
 import { OrbitalLoader } from "@/components/ui/OrbitalLoader";
+import { SeamlessLoader } from "@/components/ui/SeamlessLoader";
 
 export default function ChatPage() {
   const router = useRouter();
@@ -13,7 +14,6 @@ export default function ChatPage() {
 
   type ProcessingMode = "text" | "image" | "audio";
   const [processingMode, setProcessingMode] = useState<ProcessingMode>("text");
-  const [activeStep, setActiveStep] = useState(0);
   type ExtractionResult = {
     message?: string;
     extracted_data?: {
@@ -38,37 +38,28 @@ export default function ChatPage() {
   const steps = useMemo(() => {
     const map: Record<ProcessingMode, string[]> = {
       text: [
-        "Reading your note",
-        "Extracting merchant and amount",
-        "Categorizing transaction",
-        "Saving to ledger",
+        "Reading your note...",
+        "Extracting merchant and amount...",
+        "Categorizing transaction...",
+        "Saving to ledger...",
       ],
       image: [
-        "Uploading receipt",
-        "Reading text from image",
-        "Extracting merchant and amount",
-        "Categorizing transaction",
-        "Saving to ledger",
+        "Uploading receipt...",
+        "Reading text from image...",
+        "Extracting merchant and amount...",
+        "Categorizing transaction...",
+        "Saving to ledger...",
       ],
       audio: [
-        "Uploading audio",
-        "Transcribing speech",
-        "Extracting merchant and amount",
-        "Categorizing transaction",
-        "Saving to ledger",
+        "Uploading audio...",
+        "Transcribing speech...",
+        "Extracting merchant and amount...",
+        "Categorizing transaction...",
+        "Saving to ledger...",
       ],
     };
     return map[processingMode];
   }, [processingMode]);
-
-  useEffect(() => {
-    if (!isLoading) return;
-    setActiveStep(0);
-    const id = window.setInterval(() => {
-      setActiveStep((s) => (s + 1) % steps.length);
-    }, 3200);
-    return () => window.clearInterval(id);
-  }, [isLoading, steps.length]);
 
   const handleSendMessage = async (text: string, files?: File[]) => {
     if (!isSignedIn) {
@@ -189,100 +180,8 @@ export default function ChatPage() {
           </div>
 
           {isLoading && !message && !resultData && (
-            <div className="w-full animate-fadeIn">
-              <div className="bg-white/5 border border-white/10 rounded-2xl p-8 backdrop-blur-sm shadow-lg">
-                <div className="flex flex-col gap-6">
-                  <div className="flex items-center justify-between gap-4">
-                    <div className="flex items-center gap-3">
-                      <div className="h-2 w-2 rounded-full bg-blue-400/90 loader-pulse" />
-                      <div className="text-sm text-white/90 tracking-wide">
-                        Processing
-                        <span className="inline-flex w-4.5 justify-start">
-                          <span className="loader-dot loader-dot-1">.</span>
-                          <span className="loader-dot loader-dot-2">.</span>
-                          <span className="loader-dot loader-dot-3">.</span>
-                        </span>
-                      </div>
-                    </div>
-                    <div className="text-xs text-gray-400">
-                      {processingMode === "image" && "Receipt"}
-                      {processingMode === "audio" && "Audio"}
-                      {processingMode === "text" && "Text"}
-                    </div>
-                  </div>
-
-                  <div className="space-y-3">
-                    {steps.map((label, idx) => {
-                      const isDone = idx < activeStep;
-                      const isActive = idx === activeStep;
-                      const textClass = isActive
-                        ? "text-blue-300"
-                        : isDone
-                          ? "text-gray-300"
-                          : "text-gray-500";
-
-                      return (
-                        <div
-                          key={label}
-                          className={
-                            "flex items-center gap-3 transition-colors " +
-                            (isActive ? "loader-row" : "")
-                          }
-                        >
-                          <div
-                            className={
-                              "h-5 w-5 rounded-full flex items-center justify-center border " +
-                              (isActive
-                                ? "bg-[#1e3a8a]/25 border-[#1e3a8a]/40"
-                                : isDone
-                                  ? "bg-white/10 border-white/15"
-                                  : "bg-transparent border-white/10")
-                            }
-                          >
-                            {isDone ? (
-                              <svg
-                                width="12"
-                                height="12"
-                                viewBox="0 0 12 12"
-                                fill="none"
-                                aria-hidden="true"
-                              >
-                                <path
-                                  d="M2.2 6.2L4.8 8.8L9.8 3.6"
-                                  stroke="currentColor"
-                                  strokeWidth="1.8"
-                                  strokeLinecap="round"
-                                  strokeLinejoin="round"
-                                  className="text-gray-200"
-                                />
-                              </svg>
-                            ) : (
-                              <span
-                                className={
-                                  "h-2 w-2 rounded-full " +
-                                  (isActive
-                                    ? "bg-blue-300"
-                                    : "bg-white/25")
-                                }
-                              />
-                            )}
-                          </div>
-                          <div className={"text-sm " + textClass}>{label}</div>
-                        </div>
-                      );
-                    })}
-                  </div>
-
-                  <div className="text-xs text-gray-400">
-                    {processingMode === "image" &&
-                      "Receipts can take up to a minute depending on clarity."}
-                    {processingMode === "audio" &&
-                      "Audio can take up to a minute depending on length."}
-                    {processingMode === "text" &&
-                      "Usually finishes in a few seconds."}
-                  </div>
-                </div>
-              </div>
+            <div className="w-full mt-4">
+              <SeamlessLoader steps={steps} interval={3200} />
             </div>
           )}
 
@@ -297,7 +196,7 @@ export default function ChatPage() {
           {resultData && resultData.extracted_data && (
             <div className="w-full animate-slideUp">
               <div className="bg-white/5 border border-white/10 rounded-2xl overflow-hidden backdrop-blur-sm shadow-lg">
-                <div className="bg-linear-to-r from-[#1e40af] to-[#1e3a8a] p-5 text-white">
+                <div className="bg-linear-to-r from-[#0d9488] to-[#0f766e] p-5 text-white">
                   <div className="flex items-start justify-between">
                     <div className="flex-1">
                       <div className="text-sm mb-2">Transaction Recorded</div>
@@ -530,70 +429,11 @@ export default function ChatPage() {
           }
         }
 
-        @keyframes loaderDot {
-          0%,
-          20% {
-            opacity: 0;
-          }
-          50% {
-            opacity: 1;
-          }
-          100% {
-            opacity: 0;
-          }
-        }
-
-        @keyframes loaderPulse {
-          0% {
-            opacity: 0.4;
-            transform: scale(1);
-          }
-          50% {
-            opacity: 1;
-            transform: scale(1.15);
-          }
-          100% {
-            opacity: 0.4;
-            transform: scale(1);
-          }
-        }
-
-        @keyframes loaderRow {
-          0% {
-            opacity: 0.8;
-          }
-          50% {
-            opacity: 1;
-          }
-          100% {
-            opacity: 0.8;
-          }
-        }
-
         .animate-fadeIn {
           animation: fadeIn 0.3s ease-out;
         }
         .animate-slideUp {
           animation: slideUp 0.4s ease-out;
-        }
-
-        .loader-dot {
-          animation: loaderDot 1.2s infinite;
-          color: rgba(255, 255, 255, 0.9);
-        }
-        .loader-dot-2 {
-          animation-delay: 0.15s;
-        }
-        .loader-dot-3 {
-          animation-delay: 0.3s;
-        }
-
-        .loader-pulse {
-          animation: loaderPulse 1.1s ease-in-out infinite;
-        }
-
-        .loader-row {
-          animation: loaderRow 1.6s ease-in-out infinite;
         }
       `}</style>
     </div>

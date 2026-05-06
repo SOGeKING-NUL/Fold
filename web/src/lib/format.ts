@@ -27,26 +27,18 @@ export function formatDateTime(iso: string): string {
   });
 }
 
-const CATEGORY_COLORS: Record<string, string> = {
-  food: "#f97316",
-  shopping: "#8b5cf6",
-  travel: "#06b6d4",
-  entertainment: "#ec4899",
-  utilities: "#84cc16",
-  healthcare: "#ef4444",
-  education: "#3b82f6",
-  emi: "#f59e0b",
-  investment: "#10b981",
-  friends: "#a855f7",
-  misc: "#6b7280",
-  uncategorized: "#9ca3af",
-  expense: "#6b7280",
-  income: "#22c55e",
+// Consistent color scheme based on transaction type
+const TYPE_COLORS: Record<string, string> = {
+  expense: "#ef4444",      // red for expenses
+  income: "#22c55e",       // green for income
+  transfer: "#3b82f6",     // blue for transfers
+  investment: "#8b5cf6",   // purple for investments
+  opening_balance: "#6b7280", // gray for opening balance
 };
 
 export function categoryColor(key: string | null | undefined): string {
   if (!key) return "#6b7280";
-  return CATEGORY_COLORS[key.toLowerCase()] || "#6b7280";
+  return TYPE_COLORS[key.toLowerCase()] || "#6b7280";
 }
 
 export function capitalize(s: string): string {

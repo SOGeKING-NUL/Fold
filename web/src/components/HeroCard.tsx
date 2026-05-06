@@ -123,7 +123,7 @@ export const HeroCard = (props: ProductTeaserCardProps) => {
 
             <Link
               href={primaryButtonHref}
-              className="inline-block text-white bg-gradient-to-r from-purple-600 to-violet-600 rounded-xl px-8 py-4 text-[15px] font-medium transition-all duration-200 hover:from-purple-500 hover:to-violet-500 hover:shadow-lg hover:shadow-purple-900/30 hover:scale-105 cursor-pointer"
+              className="inline-block text-white bg-[#1e3a8a] rounded-xl px-8 py-4 text-[15px] font-medium transition-all duration-200 hover:bg-[#1e3a8a] hover:shadow-lg hover:shadow-purple-900/30 hover:scale-105 cursor-pointer"
             >
               {primaryButtonText}
             </Link>
@@ -219,7 +219,7 @@ export const HeroCard = (props: ProductTeaserCardProps) => {
                   key={label}
                   className="flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-4 py-2 text-sm text-gray-200 backdrop-blur-sm"
                 >
-                  <span className="h-1.5 w-1.5 rounded-full bg-purple-400/90" />
+                  <span className="h-1.5 w-1.5 rounded-full bg-[#1e3a8a]" />
                   <span className="whitespace-nowrap">{label}</span>
                 </div>
               ))}

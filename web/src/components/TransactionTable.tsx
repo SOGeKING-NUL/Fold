@@ -54,7 +54,6 @@ export default function TransactionTable({
       <div className="rounded-2xl border border-white/10 bg-white/5 backdrop-blur-sm overflow-hidden shadow-lg">
         <div className="divide-y divide-white/10">
           {transactions.map((tx) => {
-            const category = tx.category || tx.type;
             const amount = tx.amount || 0;
 
             return (
@@ -64,7 +63,7 @@ export default function TransactionTable({
               >
                 <div
                   className="w-2 h-2 rounded-full shrink-0 shadow-sm"
-                  style={{ backgroundColor: categoryColor(category) }}
+                  style={{ backgroundColor: categoryColor(tx.type) }}
                 />
                 <div className="flex-1 min-w-0">
                   <p className="text-sm font-medium text-white group-hover:text-blue-300 transition-colors truncate">
