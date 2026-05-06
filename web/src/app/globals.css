@@ -136,12 +136,16 @@
     @apply font-light tracking-tight;
   }
 
-  :where(a, button, input, textarea, select, summary) {
+  :where(a, button, select, summary) {
     @apply focus-visible:outline-none;
   }
 
-  :where(a, button, input, textarea, select, summary):focus-visible {
+  :where(a, button, select, summary):focus-visible {
     @apply ring-2 ring-[#1e3a8a]/60 ring-offset-2 ring-offset-black;
+  }
+  
+  :where(input, textarea) {
+    @apply focus-visible:outline-none focus:outline-none;
   }
   
   /* Smooth scrolling for anchor links */

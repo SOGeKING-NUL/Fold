@@ -5,7 +5,7 @@ import { motion } from "framer-motion";
 
 export default function LoginPage() {
   return (
-    <div className="min-h-screen flex items-center justify-center bg-linear-to-br from-black via-gray-900 to-black relative overflow-hidden">
+    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-black via-gray-900 to-black relative overflow-hidden">
       <div className="absolute inset-0 overflow-hidden pointer-events-none">
         <motion.div
           animate={{
@@ -132,12 +132,12 @@ export default function LoginPage() {
                   fallbackRedirectUrl="/reports"
                 />
               </div>
-            </div>
 
-            <div className="mt-6 text-center lg:hidden">
-              <p className="text-[13px] text-gray-500">
-                By signing in, you agree to our Terms of Service and Privacy Policy
-              </p>
+              <div className="mt-6 text-center">
+                <p className="text-[13px] text-gray-500">
+                  By signing in, you agree to our Terms of Service and Privacy Policy
+                </p>
+              </div>
             </div>
           </motion.div>
         </div>

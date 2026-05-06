@@ -123,7 +123,7 @@ export const HeroCard = (props: ProductTeaserCardProps) => {
 
             <Link
               href={primaryButtonHref}
-              className="inline-block text-white bg-[#1e3a8a] rounded-xl px-8 py-4 text-[15px] font-medium transition-all duration-200 hover:bg-[#1e40af] hover:shadow-lg hover:shadow-blue-900/20 hover:scale-105 cursor-pointer"
+              className="inline-block text-white bg-gradient-to-r from-purple-600 to-violet-600 rounded-xl px-8 py-4 text-[15px] font-medium transition-all duration-200 hover:from-purple-500 hover:to-violet-500 hover:shadow-lg hover:shadow-purple-900/30 hover:scale-105 cursor-pointer"
             >
               {primaryButtonText}
             </Link>
@@ -219,7 +219,7 @@ export const HeroCard = (props: ProductTeaserCardProps) => {
                   key={label}
                   className="flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-4 py-2 text-sm text-gray-200 backdrop-blur-sm"
                 >
-                  <span className="h-1.5 w-1.5 rounded-full bg-blue-300/90" />
+                  <span className="h-1.5 w-1.5 rounded-full bg-purple-400/90" />
                   <span className="whitespace-nowrap">{label}</span>
                 </div>
               ))}
@@ -278,9 +278,9 @@ export const HeroCard = (props: ProductTeaserCardProps) => {
                 transition={{ duration: 0.2, ease: "easeOut" }}
                 className="group relative rounded-2xl border border-white/10 bg-white/5 p-5 backdrop-blur-sm shadow-lg"
               >
-                <div className="absolute inset-0 rounded-2xl bg-linear-to-br from-blue-400/10 to-transparent opacity-0 transition-opacity duration-300 group-hover:opacity-100" />
+                <div className="absolute inset-0 rounded-2xl bg-linear-to-br from-purple-500/10 to-transparent opacity-0 transition-opacity duration-300 group-hover:opacity-100" />
                 <div className="relative">
-                  <div className="mb-3 inline-flex h-9 w-9 items-center justify-center rounded-xl border border-white/10 bg-black/20 text-blue-300">
+                  <div className="mb-3 inline-flex h-9 w-9 items-center justify-center rounded-xl border border-white/10 bg-black/20 text-purple-400">
                     {card.icon}
                   </div>
                   <div className="text-[15px] font-normal text-white">{card.title}</div>

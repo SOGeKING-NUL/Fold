@@ -101,3 +101,68 @@ export async function getTransactions(limit: number, offset: number, token: stri
     { token }
   );
 }
+
+export interface PaymentProfile {
+  id: number;
+  provider: string;
+  profile_name: string;
+  linked_account_name: string;
+}
+
+export interface PaymentProfilesResponse {
+  status: string;
+  user_ref: string;
+  profiles: PaymentProfile[];
+}
+
+export interface AccountUpsertRequest {
+  user_ref: string;
+  name: string;
+  account_type: "cash" | "bank" | "credit";
+  institution_name?: string;
+  account_number_last4?: string;
+  opening_balance?: number;
+}
+
+export interface PaymentProfileUpsertRequest {
+  user_ref: string;
+  provider: string;
+  profile_name: string;
+  linked_account_name: string;
+}
+
+export async function getAccounts(token: string) {
+  const data = await getDashboard("monthly", token);
+  return data.accounts;
+}
+
+export async function getPaymentProfiles(userRef: string, token: string) {
+  return apiFetch<PaymentProfilesResponse>(
+    `/api/v1/ledger/payment-profiles/${userRef}`,
+    { token }
+  );
+}
+
+export async function createAccount(request: AccountUpsertRequest, token: string) {
+  return apiFetch<{ status: string; result: any }>(
+    `/api/v1/ledger/accounts`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(request),
+      token,
+    }
+  );
+}
+
+export async function linkPaymentProfile(request: PaymentProfileUpsertRequest, token: string) {
+  return apiFetch<{ status: string; result: any }>(
+    `/api/v1/ledger/payment-profiles`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(request),
+      token,
+    }
+  );
+}

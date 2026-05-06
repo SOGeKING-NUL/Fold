@@ -20,7 +20,7 @@ interface TextareaProps extends React.TextareaHTMLAttributes<HTMLTextAreaElement
 const Textarea = React.forwardRef<HTMLTextAreaElement, TextareaProps>(({ className, ...props }, ref) => (
   <textarea
     className={cn(
-      "flex w-full rounded-md bg-transparent px-3 py-2.5 text-base text-gray-100 placeholder:text-gray-400 disabled:cursor-not-allowed disabled:opacity-50 min-h-11 resize-none scrollbar-thin scrollbar-thumb-[#444444] scrollbar-track-transparent hover:scrollbar-thumb-[#555555]",
+      "flex w-full rounded-md bg-transparent px-3 py-2.5 text-base text-gray-100 placeholder:text-gray-400 disabled:cursor-not-allowed disabled:opacity-50 min-h-11 resize-none scrollbar-thin scrollbar-thumb-[#444444] scrollbar-track-transparent hover:scrollbar-thumb-[#555555] focus:outline-none focus-visible:outline-none",
       className
     )}
     ref={ref}
@@ -177,20 +177,21 @@ const VoiceRecorder: React.FC<VoiceRecorderProps> = ({
 
   React.useEffect(() => {
     if (isRecording) {
-      onStartRecordingRef.current();
-      timeRef.current = 0;
-      setTime(0);
-      timerRef.current = setInterval(() => {
-        setTime((t) => {
-          timeRef.current = t + 1;
-          return t + 1;
-        });
-      }, 1000);
-      
-      // Start recording
+      // Start recording - wait for permission before starting timer
       audioChunksRef.current = [];
       navigator.mediaDevices.getUserMedia({ audio: true })
         .then((stream) => {
+          // Permission granted - now start the timer and recording
+          onStartRecordingRef.current();
+          timeRef.current = 0;
+          setTime(0);
+          timerRef.current = setInterval(() => {
+            setTime((t) => {
+              timeRef.current = t + 1;
+              return t + 1;
+            });
+          }, 1000);
+          
           const mediaRecorder = new MediaRecorder(stream);
           mediaRecorderRef.current = mediaRecorder;
           
