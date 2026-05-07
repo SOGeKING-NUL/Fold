@@ -3,7 +3,6 @@ import { motion } from "framer-motion"
 import Link from "next/link"
 import Image from "next/image"
 import { Marquee } from "@/components/ui/marquee"
-import { AsciiWave } from "./ui/AsciiWave"
 
 type ProductTeaserCardProps = {
   headline?: string
@@ -81,6 +80,8 @@ export const HeroCard = (props: ProductTeaserCardProps) => {
                     src="/coin1.png"
                     alt="Indian 1 Rupee Coin - Front"
                     fill
+                    priority
+                    sizes="192px"
                     className="object-cover"
                   />
                 </div>
@@ -95,6 +96,8 @@ export const HeroCard = (props: ProductTeaserCardProps) => {
                     src="/coin2.png"
                     alt="Indian 1 Rupee Coin - Back"
                     fill
+                    priority
+                    sizes="192px"
                     className="object-cover"
                   />
                 </div>
@@ -103,13 +106,13 @@ export const HeroCard = (props: ProductTeaserCardProps) => {
           </div>
         </motion.div>
 
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-12 lg:gap-20 items-center mb-32 relative">
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-12 lg:gap-20 items-center mb-32 relative">
 
           <motion.div
             initial={{ opacity: 0, x: -30 }}
             animate={{ opacity: 1, x: 0 }}
             transition={{ duration: 0.8, ease: [0.22, 1, 0.36, 1], delay: 0.2 }}
-            className="relative z-10"
+            className="relative z-10 lg:col-span-5"
           >
             <h1 className="text-[48px] md:text-[64px] leading-[1.1] tracking-tight text-white mb-6 font-light">
               {headline}
@@ -121,7 +124,7 @@ export const HeroCard = (props: ProductTeaserCardProps) => {
 
             <Link
               href={primaryButtonHref}
-              className="inline-block text-white bg-[#1e3a8a] rounded-xl px-8 py-4 text-[15px] font-medium transition-all duration-200 hover:bg-[#1e3a8a] hover:shadow-lg hover:shadow-purple-900/30 hover:scale-105 cursor-pointer"
+              className="inline-block text-white bg-[#1e3a8a] rounded-xl px-8 py-4 text-[15px] font-medium transition-all duration-200 hover:bg-[#1e40af] hover:shadow-lg hover:shadow-blue-900/30 hover:scale-105 cursor-pointer"
             >
               {primaryButtonText}
             </Link>
@@ -131,7 +134,7 @@ export const HeroCard = (props: ProductTeaserCardProps) => {
             initial={{ opacity: 0, x: 30 }}
             animate={{ opacity: 1, x: 0 }}
             transition={{ duration: 0.8, ease: [0.22, 1, 0.36, 1], delay: 0.4 }}
-            className="relative z-10"
+            className="relative z-10 lg:col-span-7"
           >
             <div className="relative w-full aspect-video bg-white/5 backdrop-blur-sm rounded-[40px] overflow-hidden shadow-2xl border border-white/10">
               {videoSrc ? (
@@ -141,38 +144,18 @@ export const HeroCard = (props: ProductTeaserCardProps) => {
                   muted
                   loop
                   playsInline
-                  poster={posterSrc}
+                  poster={posterSrc || undefined}
                   className="w-full h-full object-cover"
                 />
               ) : (
-                <div className="w-full h-full flex items-center justify-center relative bg-linear-to-br from-gray-900/50 to-gray-800/30">
-                  <div className="absolute inset-0 opacity-5">
-                    <div className="w-full h-full" style={{
-                      backgroundImage: `
-                        linear-gradient(rgba(255, 255, 255, 0.1) 1px, transparent 1px),
-                        linear-gradient(90deg, rgba(255, 255, 255, 0.1) 1px, transparent 1px)
-                      `,
-                      backgroundSize: '40px 40px'
-                    }} />
-                  </div>
-
-                  <div className="relative z-10 text-center space-y-4">
-                    <svg 
-                      className="w-16 h-16 mx-auto text-gray-600" 
-                      fill="none" 
-                      viewBox="0 0 24 24" 
-                      stroke="currentColor"
-                    >
-                      <path 
-                        strokeLinecap="round" 
-                        strokeLinejoin="round" 
-                        strokeWidth={1.5} 
-                        d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" 
-                      />
-                    </svg>
-                    <div className="text-gray-500 text-sm">Demo video coming soon</div>
-                  </div>
-                </div>
+                <Image
+                  src="/hero-demo.png"
+                  alt="Fold App Demo"
+                  fill
+                  priority
+                  sizes="(max-width: 1024px) 100vw, 60vw"
+                  className="object-cover"
+                />
               )}
             </div>
           </motion.div>
@@ -264,15 +247,6 @@ export const HeroCard = (props: ProductTeaserCardProps) => {
           </div>
         </div>
       </div>
-
-      <style jsx>{`
-        .delay-150 {
-          animation-delay: 150ms;
-        }
-        .delay-300 {
-          animation-delay: 300ms;
-        }
-      `}</style>
     </section>
   )
 }

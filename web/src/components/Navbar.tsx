@@ -51,6 +51,7 @@ export const Navbar = () => {
       router.push("/")
     }
   }
+
   return (
     <nav
       className={`fixed top-0 left-0 right-0 z-50 transition-all duration-300 ${
@@ -61,8 +62,10 @@ export const Navbar = () => {
         <div className="flex items-center justify-between h-20">
           <div className="shrink-0">
             <button
+              type="button"
               onClick={() => handleLinkClick("")}
               className="text-2xl text-white hover:text-gray-300 transition-colors duration-200 cursor-pointer font-medium"
+              aria-label="Go to home"
             >
               Fold AI
             </button>
@@ -74,6 +77,7 @@ export const Navbar = () => {
                 {navigationLinks.map((link) => (
                   <button
                     key={link.name}
+                    type="button"
                     onClick={() => handleLinkClick(link.href)}
                     className="text-white hover:text-gray-300 font-semibold px-3 py-2 text-base transition-colors duration-200 relative group cursor-pointer"
                   >
@@ -89,6 +93,7 @@ export const Navbar = () => {
             {isSignedIn ? (
               <>
                 <button
+                  type="button"
                   onClick={() => router.push("/reports")}
                   className="px-4 py-2 text-sm bg-[#1e3a8a] hover:bg-[#1e40af] text-white rounded-lg transition-colors cursor-pointer font-medium"
                 >
@@ -98,6 +103,7 @@ export const Navbar = () => {
               </>
             ) : (
               <button
+                type="button"
                 onClick={() => router.push("/login")}
                 className="px-4 py-2 text-sm bg-[#1e3a8a] hover:bg-[#1e40af] text-white rounded-lg transition-colors cursor-pointer font-medium"
               >
@@ -108,9 +114,12 @@ export const Navbar = () => {
 
           <div className="md:hidden">
             <button
+              type="button"
               onClick={toggleMobileMenu}
               className="text-gray-200 hover:text-white p-2 rounded-md transition-colors duration-200 cursor-pointer"
               aria-label="Toggle mobile menu"
+              aria-expanded={isMobileMenuOpen}
+              aria-controls="mobile-nav"
             >
               {isMobileMenuOpen ? <X size={24} /> : <Menu size={24} />}
             </button>
@@ -126,11 +135,13 @@ export const Navbar = () => {
             exit={{ opacity: 0, height: 0 }}
             transition={{ duration: 0.3, ease: "easeInOut" }}
             className="md:hidden bg-black/70 backdrop-blur-md border-t border-white/10"
+            id="mobile-nav"
           >
             <div className="px-6 py-6 space-y-4">
               {isSignedIn && navigationLinks.map((link) => (
                 <button
                   key={link.name}
+                  type="button"
                   onClick={() => handleLinkClick(link.href)}
                   className="block w-full text-left text-white hover:text-gray-300 py-3 text-lg font-normal transition-colors duration-200 cursor-pointer"
                 >
@@ -140,13 +151,15 @@ export const Navbar = () => {
               <div className="pt-4 border-t border-white/5">
                 {isSignedIn ? (
                   <button
+                    type="button"
                     onClick={() => handleLinkClick("/reports")}
-                    className="w-full bg-[#1e3a8a] text-white px-4.5 py-3.75 rounded-lg text-base font-semibold hover:bg-[#1e40af] transition-all duration-200 cursor-pointer"
+                    className="w-full bg-[#1e3a8a] text-white px-[18px] py-[15px] rounded-lg text-base font-semibold hover:bg-[#1e40af] transition-all duration-200 cursor-pointer"
                   >
                     View Report
                   </button>
                 ) : (
                   <button
+                    type="button"
                     onClick={() => handleLinkClick("/login")}
                     className="w-full bg-[#1e3a8a] text-white px-[18px] py-[15px] rounded-lg text-base font-semibold hover:bg-[#1e40af] transition-all duration-200 cursor-pointer"
                   >

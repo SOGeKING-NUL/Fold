@@ -144,7 +144,7 @@ export async function getPaymentProfiles(userRef: string, token: string) {
 }
 
 export async function createAccount(request: AccountUpsertRequest, token: string) {
-  return apiFetch<{ status: string; result: any }>(
+  return apiFetch<{ status: string; result: unknown }>(
     `/api/v1/ledger/accounts`,
     {
       method: "POST",
@@ -156,7 +156,7 @@ export async function createAccount(request: AccountUpsertRequest, token: string
 }
 
 export async function linkPaymentProfile(request: PaymentProfileUpsertRequest, token: string) {
-  return apiFetch<{ status: string; result: any }>(
+  return apiFetch<{ status: string; result: unknown }>(
     `/api/v1/ledger/payment-profiles`,
     {
       method: "POST",

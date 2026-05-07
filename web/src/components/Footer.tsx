@@ -59,8 +59,8 @@ const defaultSections: FooterSection[] = [
 ]
 
 export const Footer = ({
-  companyName = "Fold",
-  tagline = "AI-Powered Expense Tracking for Modern India",
+  companyName = "Fold AI",
+  tagline = "AI-Powered Expense Tracking for Modern India", 
   sections = defaultSections,
   copyrightText,
 }: FooterProps) => {
@@ -69,14 +69,14 @@ export const Footer = ({
 
   return (
     <footer className="w-full border-t border-white/10">
-      <div className="max-w-350 mx-auto px-6 md:px-12 py-20">
-        <div className="grid grid-cols-2 md:grid-cols-6 gap-12 mb-16">
+      <div className="max-w-350 mx-auto px-6 md:px-12 py-16 md:py-20">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-x-12 gap-y-10 mb-14 md:mb-16">
           <motion.div
             initial={{ opacity: 0, y: 20 }}
             whileInView={{ opacity: 1, y: 0 }}
             viewport={{ once: true, margin: "-50px" }}
             transition={{ duration: 0.5, ease: "easeOut" }}
-            className="col-span-2"
+            className="sm:col-span-2 lg:col-span-2"
           >
             <div className="mb-6">
               <h3 className="text-[24px] font-light text-white mb-3">
@@ -95,7 +95,7 @@ export const Footer = ({
               whileInView={{ opacity: 1, y: 0 }}
               viewport={{ once: true, margin: "-50px" }}
               transition={{ duration: 0.5, delay: index * 0.1, ease: "easeOut" }}
-              className="col-span-1"
+              className="min-w-0"
             >
               <h4 className="text-[13px] font-medium text-white mb-4 uppercase tracking-wider">
                 {section.title}
@@ -132,8 +132,8 @@ export const Footer = ({
           transition={{ duration: 0.5, delay: 0.6 }}
           className="pt-8 border-t border-white/10"
         >
-          <div className="flex flex-col md:flex-row justify-between items-center gap-4">
-            <p className="text-[14px] text-gray-500 font-light">{copyright}</p>
+          <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+            <p className="text-[14px] text-gray-500 font-light text-left">{copyright}</p>
           </div>
         </motion.div>
       </div>

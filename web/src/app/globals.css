@@ -155,3 +155,10 @@
     }
   }
 }
+
+@layer utilities {
+  /* Used across landing page sections (approx 1400px). */
+  .max-w-350 {
+    max-width: 87.5rem;
+  }
+}
