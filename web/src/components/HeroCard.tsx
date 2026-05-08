@@ -2,7 +2,6 @@
 import { motion } from "framer-motion"
 import Link from "next/link"
 import Image from "next/image"
-import { Marquee } from "@/components/ui/marquee"
 
 type ProductTeaserCardProps = {
   headline?: string
@@ -22,17 +21,6 @@ export const HeroCard = (props: ProductTeaserCardProps) => {
     videoSrc = "",
     posterSrc = "",
   } = props
-
-  const chips = [
-    "UPI screenshots",
-    "Receipt OCR",
-    "Hinglish voice notes",
-    "Auto categorization",
-    "Cash flow detection",
-    "Merchant extraction",
-    "Bank + wallet support",
-    "Export anytime",
-  ]
 
   return (
     <section className="w-full px-6 md:px-12 pt-32 pb-24 bg-transparent relative overflow-hidden">
@@ -124,7 +112,7 @@ export const HeroCard = (props: ProductTeaserCardProps) => {
 
             <Link
               href={primaryButtonHref}
-              className="inline-block text-white bg-[#1e3a8a] rounded-xl px-8 py-4 text-[15px] font-medium transition-all duration-200 hover:bg-[#1e40af] hover:shadow-lg hover:shadow-blue-900/30 hover:scale-105 cursor-pointer"
+              className="inline-block text-white bg-[#0d9488] rounded-xl px-8 py-4 text-[15px] font-medium transition-all duration-200 hover:bg-[#0f766e] hover:shadow-lg hover:shadow-[#0d9488]/30 hover:scale-105 cursor-pointer"
             >
               {primaryButtonText}
             </Link>
@@ -159,92 +147,6 @@ export const HeroCard = (props: ProductTeaserCardProps) => {
               )}
             </div>
           </motion.div>
-        </div>
-
-        <div className="border-t border-white/10 pt-12">
-          <div className="flex items-center justify-center gap-3 text-xs uppercase tracking-[0.22em] text-gray-500 mb-6">
-            <span className="h-px w-10 bg-white/10" />
-            Built for India
-            <span className="h-px w-10 bg-white/10" />
-          </div>
-
-          <Marquee durationSeconds={18} className="py-2">
-            <div className="flex items-center gap-3 pr-3">
-              {chips.map((label) => (
-                <div
-                  key={label}
-                  className="flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-4 py-2 text-sm text-gray-200 backdrop-blur-sm"
-                >
-                  <span className="h-1.5 w-1.5 rounded-full bg-[#1e3a8a]" />
-                  <span className="whitespace-nowrap">{label}</span>
-                </div>
-              ))}
-            </div>
-          </Marquee>
-
-          <div className="mt-14 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-            {[
-              {
-                title: "Multi-input",
-                desc: "Type, upload, or speak — all in one place.",
-                icon: (
-                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                    <path d="M7 7h10M7 12h6M7 17h8" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
-                    <path d="M5 4h14a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H9l-4 3V6a2 2 0 0 1 2-2Z" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" />
-                  </svg>
-                ),
-              },
-              {
-                title: "Accurate extraction",
-                desc: "Merchant, amount, method — pulled automatically.",
-                icon: (
-                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                    <path d="M4 7h16M7 4v6M17 4v6" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
-                    <path d="M6 11h5M6 15h9" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
-                    <path d="M5 5h14a2 2 0 0 1 2 2v14H7a2 2 0 0 1-2-2V5Z" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" />
-                  </svg>
-                ),
-              },
-              {
-                title: "Smart categories",
-                desc: "Clean charts and reports, without manual cleanup.",
-                icon: (
-                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                    <path d="M4 20V10" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
-                    <path d="M10 20V4" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
-                    <path d="M16 20v-8" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
-                    <path d="M22 20V8" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
-                  </svg>
-                ),
-              },
-              {
-                title: "Private by default",
-                desc: "Your data stays yours. Built with security in mind.",
-                icon: (
-                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                    <path d="M7 11V8a5 5 0 0 1 10 0v3" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
-                    <path d="M6 11h12a2 2 0 0 1 2 2v7H4v-7a2 2 0 0 1 2-2Z" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" />
-                  </svg>
-                ),
-              },
-            ].map((card) => (
-              <motion.div
-                key={card.title}
-                whileHover={{ y: -4 }}
-                transition={{ duration: 0.2, ease: "easeOut" }}
-                className="group relative rounded-2xl border border-white/10 bg-white/5 p-5 backdrop-blur-sm shadow-lg"
-              >
-                <div className="absolute inset-0 rounded-2xl bg-linear-to-br from-purple-500/10 to-transparent opacity-0 transition-opacity duration-300 group-hover:opacity-100" />
-                <div className="relative">
-                  <div className="mb-3 inline-flex h-9 w-9 items-center justify-center rounded-xl border border-white/10 bg-black/20 text-purple-400">
-                    {card.icon}
-                  </div>
-                  <div className="text-[15px] font-normal text-white">{card.title}</div>
-                  <div className="mt-2 text-sm leading-relaxed text-gray-400 font-light">{card.desc}</div>
-                </div>
-              </motion.div>
-            ))}
-          </div>
         </div>
       </div>
     </section>

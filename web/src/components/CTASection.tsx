@@ -27,7 +27,7 @@ export const CTASection = () => {
             <div className="flex flex-col sm:flex-row gap-4 justify-center items-center">
               <Link
                 href="/chat"
-                className="inline-block text-white bg-[#1e3a8a] rounded-xl px-10 py-4 text-[15px] font-medium transition-all duration-200 hover:bg-[#1e40af] hover:shadow-xl hover:shadow-blue-900/20 hover:scale-105 cursor-pointer"
+                className="inline-block text-white bg-[#0d9488] rounded-xl px-10 py-4 text-[15px] font-medium transition-all duration-200 hover:bg-[#0f766e] hover:shadow-xl hover:shadow-[#0d9488]/20 hover:scale-105 cursor-pointer"
               >
                 Get Started Free
               </Link>
@@ -43,9 +43,9 @@ export const CTASection = () => {
                 transition={{ duration: 0.6, delay: 0.1 }}
                 className="relative group"
               >
-                <div className="absolute inset-0 bg-linear-to-br from-blue-400/5 to-transparent rounded-2xl opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
+                <div className="absolute inset-0 bg-linear-to-br from-[#0d9488]/5 to-transparent rounded-2xl opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
                 <div className="relative p-6">
-                  <div className="mb-4 text-blue-400">
+                  <div className="mb-4 text-[#0d9488]">
                     <svg width="32" height="32" viewBox="0 0 24 24" fill="none">
                       <path d="M12 2L2 7L12 12L22 7L12 2Z" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
                       <path d="M2 17L12 22L22 17" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
@@ -66,9 +66,9 @@ export const CTASection = () => {
                 transition={{ duration: 0.6, delay: 0.2 }}
                 className="relative group"
               >
-                <div className="absolute inset-0 bg-linear-to-br from-blue-400/5 to-transparent rounded-2xl opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
+                <div className="absolute inset-0 bg-linear-to-br from-[#0d9488]/5 to-transparent rounded-2xl opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
                 <div className="relative p-6">
-                  <div className="mb-4 text-blue-400">
+                  <div className="mb-4 text-[#0d9488]">
                     <svg width="32" height="32" viewBox="0 0 24 24" fill="none">
                       <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="1.5"/>
                       <path d="M12 6V12L16 14" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
@@ -88,9 +88,9 @@ export const CTASection = () => {
                 transition={{ duration: 0.6, delay: 0.3 }}
                 className="relative group"
               >
-                <div className="absolute inset-0 bg-linear-to-br from-blue-400/5 to-transparent rounded-2xl opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
+                <div className="absolute inset-0 bg-linear-to-br from-[#0d9488]/5 to-transparent rounded-2xl opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
                 <div className="relative p-6">
-                  <div className="mb-4 text-blue-400">
+                  <div className="mb-4 text-[#0d9488]">
                     <svg width="32" height="32" viewBox="0 0 24 24" fill="none">
                       <rect x="3" y="11" width="18" height="11" rx="2" stroke="currentColor" strokeWidth="1.5"/>
                       <path d="M7 11V7C7 4.79086 8.79086 3 11 3H13C15.2091 3 17 4.79086 17 7V11" stroke="currentColor" strokeWidth="1.5"/>

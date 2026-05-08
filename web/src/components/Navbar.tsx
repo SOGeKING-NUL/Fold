@@ -95,7 +95,7 @@ export const Navbar = () => {
                 <button
                   type="button"
                   onClick={() => router.push("/reports")}
-                  className="px-4 py-2 text-sm bg-[#1e3a8a] hover:bg-[#1e40af] text-white rounded-lg transition-colors cursor-pointer font-medium"
+                  className="px-4 py-2 text-sm bg-[#0d9488] hover:bg-[#0f766e] text-white rounded-lg transition-colors cursor-pointer font-medium"
                 >
                   View Report
                 </button>
@@ -153,7 +153,7 @@ export const Navbar = () => {
                   <button
                     type="button"
                     onClick={() => handleLinkClick("/reports")}
-                    className="w-full bg-[#1e3a8a] text-white px-[18px] py-[15px] rounded-lg text-base font-semibold hover:bg-[#1e40af] transition-all duration-200 cursor-pointer"
+                    className="w-full bg-[#0d9488] text-white px-[18px] py-[15px] rounded-lg text-base font-semibold hover:bg-[#0f766e] transition-all duration-200 cursor-pointer"
                   >
                     View Report
                   </button>
