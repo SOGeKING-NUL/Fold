@@ -250,7 +250,6 @@ Settings are loaded from `.env` at project root. The loader prefers `.env` value
 | `accounts` | User-scoped chart of accounts. Fields: `name`, `account_type` (cash/bank/credit), `balance` (minor units), `institution_name`, `account_number_last4`, `is_default`, `created_at`. **Constraint:** `positive_balance_non_credit` prevents negative balances for cash/bank accounts (credit cards can go negative) |
 | `payment_profiles` | UPI/card/wallet/bank_app profiles. Optional `linked_account_id` → `accounts`. Fields: `profile_type`, `provider`, `profile_name`, `handle_ref` |
 | `journal_transactions` | One row per business event. `source`, `description`, `external_ref`, `transaction_type` (expense/income/investment/transfer/opening_balance), `occurred_at`, `metadata_json`. Unique on `(user_id, source, external_ref)` with nulls distinct |
-| `journal_media` | Binary media (`file_bytes`) attached to a journal |
 | `ledger_entries` | Double-entry lines: `journal_transaction_id`, `account_id`, `debit`/`credit`, `amount_minor`, `currency` |
 | `telegram_sessions` | Bot FSM state per `telegram_user_id`. Stores `state`, `payload_json`, `funding_account_code/type` |
 | `telegram_expense_pending_media` | Pending image/audio keyed by `telegram_user_id` for multi-step flows |

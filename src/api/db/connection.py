@@ -22,7 +22,6 @@ def get_db_connection():
         raise last_exc
 
 _RESET_SCHEMA_SQL = """
-    DROP TABLE IF EXISTS journal_media CASCADE;
     DROP TABLE IF EXISTS payment_profiles CASCADE;
     DROP TABLE IF EXISTS ingestion_events CASCADE;
     DROP TABLE IF EXISTS ledger_entries CASCADE;
@@ -88,14 +87,6 @@ _RESET_SCHEMA_SQL = """
         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
 
-    CREATE TABLE journal_media (
-        id BIGSERIAL PRIMARY KEY,
-        transaction_id BIGINT NOT NULL REFERENCES transactions(id) ON DELETE CASCADE,
-        media_kind TEXT NOT NULL CHECK (media_kind IN ('image', 'audio')),
-        mime_type TEXT,
-        file_bytes BYTEA NOT NULL,
-        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-    );
 """
 
 def ensure_schema() -> None:
@@ -197,14 +188,6 @@ def ensure_schema() -> None:
                     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
                 );
 
-                CREATE TABLE IF NOT EXISTS journal_media (
-                    id BIGSERIAL PRIMARY KEY,
-                    transaction_id BIGINT NOT NULL REFERENCES transactions(id) ON DELETE CASCADE,
-                    media_kind TEXT NOT NULL CHECK (media_kind IN ('image', 'audio')),
-                    mime_type TEXT,
-                    file_bytes BYTEA NOT NULL,
-                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-                );
             """)
         conn.commit()
 

@@ -322,21 +322,6 @@ class LedgerRepository:
                 cur.execute(query, (clerk_user_id, days))
                 return cur.fetchall()
 
-    def insert_journal_media(self, transaction_id: int, media_kind: str, mime_type: str | None, file_bytes: bytes) -> dict:
-        with get_db_connection() as conn:
-            with conn.cursor(row_factory=dict_row) as cur:
-                cur.execute(
-                    """
-                    INSERT INTO journal_media (transaction_id, media_kind, mime_type, file_bytes)
-                    VALUES (%s, %s, %s, %s)
-                    RETURNING *
-                    """,
-                    (transaction_id, media_kind, mime_type, file_bytes)
-                )
-                row = cur.fetchone()
-            conn.commit()
-            return dict(row)
-
     def reassign_expense_category(self, user_ref: str, transaction_id: int, new_category: str) -> dict:
         with get_db_connection() as conn:
             with conn.cursor(row_factory=dict_row) as cur:
