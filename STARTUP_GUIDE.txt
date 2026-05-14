@@ -1,0 +1,220 @@
+================================================================================
+                        FOLD - STARTUP GUIDE
+================================================================================
+
+This guide will help you set up and run the Fold application locally.
+
+================================================================================
+PREREQUISITES
+================================================================================
+
+1. Python 3.11 or higher
+2. Node.js 18 or higher
+3. PostgreSQL database (or use a cloud provider like Neon, Supabase)
+4. Ollama (optional, for better OCR text extraction)
+   - Download from: https://ollama.com/
+   - After installation, run: ollama pull qwen2.5:3b-instruct
+
+================================================================================
+INITIAL SETUP
+================================================================================
+
+1. CLONE THE REPOSITORY
+   ------------------------
+   git clone <your-repo-url>
+   cd Fold
+
+2. SETUP BACKEND ENVIRONMENT
+   ------------------------
+   a) Create a Python virtual environment:
+      python -m venv venv
+
+   b) Activate the virtual environment:
+      Windows (PowerShell):  .\venv\Scripts\Activate.ps1
+      Windows (CMD):         .\venv\Scripts\activate.bat
+      Linux/Mac:             source venv/bin/activate
+
+   c) Install Python dependencies:
+      pip install -r requirements.txt
+
+   d) Setup environment variables:
+      - Copy .env.example to .env
+      - Fill in your actual values (database URL, API keys, etc.)
+
+3. SETUP FRONTEND ENVIRONMENT
+   ------------------------
+   a) Navigate to the web directory:
+      cd web
+
+   b) Install Node.js dependencies:
+      npm install
+
+   c) Setup environment variables:
+      - Copy .env.example to .env.local
+      - Fill in your actual values (API URL, Clerk keys)
+
+   d) Return to root directory:
+      cd ..
+
+4. SETUP DATABASE
+   ------------------------
+   The database schema will be created automatically when you first run
+   the backend server. Make sure your DATABASE_URL in .env is correct.
+
+================================================================================
+STARTING THE APPLICATION
+================================================================================
+
+You need to run BOTH the backend and frontend servers.
+
+METHOD 1: MANUAL START (Recommended for Development)
+-----------------------------------------------------
+
+STEP 1: Start the Backend Server
+   a) Open a terminal/command prompt
+   b) Navigate to the project root directory
+   c) Activate the virtual environment:
+      Windows (PowerShell):  .\venv\Scripts\Activate.ps1
+      Windows (CMD):         .\venv\Scripts\activate.bat
+      Linux/Mac:             source venv/bin/activate
+   
+   d) Start the FastAPI server:
+      uvicorn src.api.main:app --reload --port 8000
+   
+   e) Backend will be running at: http://localhost:8000
+   f) API docs available at: http://localhost:8000/docs
+
+STEP 2: Start the Frontend Server
+   a) Open a NEW terminal/command prompt (keep backend running)
+   b) Navigate to the web directory:
+      cd web
+   
+   c) Start the Next.js development server:
+      npm run dev
+   
+   d) Frontend will be running at: http://localhost:3000
+
+METHOD 2: USING BATCH FILE (Windows Only)
+------------------------------------------
+   
+   For Windows users, you can use the provided batch file:
+   
+   a) Double-click start-backend.bat to start the backend
+   b) Open a new terminal and run: cd web && npm run dev
+
+
+================================================================================
+ACCESSING THE APPLICATION
+================================================================================
+
+1. Open your browser and go to: http://localhost:3000
+2. Sign up or log in using Clerk authentication
+3. Start tracking expenses!
+
+================================================================================
+TESTING THE EXTRACTION PIPELINES
+================================================================================
+
+To test if the ML models are working correctly:
+
+1. Make sure the backend is running
+2. Run the test script:
+   python test_extraction_pipelines.py
+
+This will test:
+- Text extraction (NLP model)
+- Image extraction (OCR + NLP)
+- Audio extraction (Whisper STT + NLP)
+
+================================================================================
+STOPPING THE APPLICATION
+================================================================================
+
+1. Stop the frontend: Press Ctrl+C in the frontend terminal
+2. Stop the backend: Press Ctrl+C in the backend terminal
+3. Deactivate virtual environment: Type 'deactivate' and press Enter
+
+================================================================================
+TROUBLESHOOTING
+================================================================================
+
+ISSUE: "Module not found" errors
+SOLUTION: Make sure you've installed all dependencies:
+   - Backend: pip install -r requirements.txt
+   - Frontend: cd web && npm install
+
+ISSUE: "Database connection failed"
+SOLUTION: Check your DATABASE_URL in .env is correct and the database is running
+
+ISSUE: "Port already in use"
+SOLUTION: 
+   - Backend: Change port in uvicorn command (e.g., --port 8001)
+   - Frontend: Next.js will automatically try port 3001 if 3000 is busy
+
+ISSUE: "Clerk authentication not working"
+SOLUTION: Make sure your Clerk keys are correct in both .env and web/.env.local
+
+ISSUE: "OCR/NLP models not working"
+SOLUTION: 
+   - Check if Python dependencies are installed: pip list
+   - For Ollama: Make sure Ollama is running and model is pulled
+   - Run test_extraction_pipelines.py to diagnose issues
+
+ISSUE: "GZIP import error"
+SOLUTION: This is already fixed in the code. If you see it, pull latest changes.
+
+================================================================================
+PRODUCTION DEPLOYMENT
+================================================================================
+
+For production deployment:
+
+1. Set environment variables properly (no .env files in production)
+2. Use a production-grade database (not SQLite)
+3. Change FOLD_WEB_SIGNING_SECRET to a secure random string
+4. Update FOLD_WEB_ORIGINS to your production domain
+5. Use a production ASGI server (uvicorn with workers or gunicorn)
+6. Build the frontend: cd web && npm run build
+7. Start frontend in production mode: npm start
+
+================================================================================
+USEFUL COMMANDS
+================================================================================
+
+Backend:
+--------
+- Start server: uvicorn src.api.main:app --reload --port 8000
+- Run tests: python test_extraction_pipelines.py
+- Check dependencies: pip list
+- Update dependencies: pip install -r requirements.txt --upgrade
+
+Frontend:
+---------
+- Start dev server: npm run dev
+- Build for production: npm run build
+- Start production server: npm start
+- Lint code: npm run lint
+
+Database:
+---------
+- The schema is auto-created on first run
+- To reset: Drop all tables and restart the backend
+
+Git:
+----
+- Check status: git status
+- Commit changes: git add . && git commit -m "message"
+- Push changes: git push origin main
+
+================================================================================
+SUPPORT
+================================================================================
+
+For issues or questions:
+1. Check the README.md for detailed documentation
+2. Review the PROJECT_OVERVIEW.md for architecture details
+3. Check the API docs at http://localhost:8000/docs
+
+================================================================================
+HAPPY TRACKING! 💰
+================================================================================
