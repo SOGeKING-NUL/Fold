@@ -38,13 +38,6 @@ Fold isn't just an expense tracker—it's a complete financial management system
 
 Fold accepts expenses in **any format** you prefer—no forms, no dropdowns, just natural input.
 
-**📝 Text Input:**
-```
-"Paid 450 for Swiggy order via GPay"
-"100 rupay ka chai piya"  (Hinglish)
-"₹1,200 - Electricity bill - HDFC card"
-```
-
 ![Text Input Demo](assests/text.gif)
 
 **🎤 Voice Input:**
