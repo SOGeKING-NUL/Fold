@@ -4,17 +4,6 @@
 <p>Track expenses naturally—just speak, snap a receipt, or type. Fold understands Hinglish, extracts transaction details automatically, and maintains professional double-entry accounting. Built specifically for the Indian payment ecosystem.</p>
 </div>
 
----
-
-## 🚀 See Fold in Action
-
-*Watch how Fold processes expenses from voice notes, UPI screenshots, and text messages—all in Hinglish.*
-
-> **[🎥 Full Demo Video Coming Soon]**  
-> *Complete walkthrough of all features: voice input, image processing, text extraction, account management, and reports*
-
----
-
 ## 🏗️ How It Works (System Architecture)
 
 Fold uses a sophisticated multi-stage pipeline to extract financial data from any input modality. The system is built for ultra-low latency with synchronous processing—no queues, no polling, just instant results.
