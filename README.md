@@ -331,55 +331,6 @@ Communicate naturally in mixed Hindi-English. No need to translate—speak/type 
 
 ---
 
-## 📈 Model Performance
-
-**NLP Classification (DistilBERT v3):**
-- **Category Accuracy:** ~94% (10 classes)
-- **Payment Method Accuracy:** ~98% (3 classes)
-- **Bank Account Accuracy:** ~91% (20 classes)
-- **Training Data:** 42,500+ examples
-- **Inference Time:** ~500ms
-
-**OCR Extraction (PaddleOCR):**
-- **Text Extraction:** ~2-3 seconds
-- **Amount Detection:** 85%+ accuracy with plausibility filters
-- **UPI Logo Detection:** 90%+ accuracy (Roboflow)
-
-**Speech-to-Text (Whisper):**
-- **Transcription Time:** ~2-4 seconds
-- **Language Support:** Hindi, English, Hinglish
-- **Accuracy:** High for financial domain with custom prompts
-
----
-
-## 🎓 What Makes Fold Unique?
-
-1. **India-First Design:** Built specifically for Indian payment ecosystem (UPI, Indian banks, Hinglish)
-2. **Multi-Modal Intelligence:** Understands text, voice, and images equally well
-3. **Professional Accounting:** Double-entry ledger system, not just expense tracking
-4. **Privacy-Focused:** All ML models run locally, no data sent to cloud AI services
-5. **Zero Learning Curve:** Natural language input, no forms or categories to remember
-6. **Telegram Integration:** Full functionality without installing an app
-7. **Smart Account Resolution:** Automatically figures out which account to charge based on payment method
-8. **Continuous Learning:** Gets smarter from user corrections
-9. **Synchronous Processing:** Instant feedback, no queues or polling
-10. **Open Architecture:** REST API for programmatic access
-
----
-
-## 🔮 Future Enhancements
-
-- **Recurring Expense Detection:** Automatically identify subscriptions and recurring bills
-- **Budget Alerts:** Set category-wise budgets and get notifications
-- **Expense Splitting:** Split bills with friends and track who owes what
-- **Tax Reports:** Generate tax-ready expense reports by category
-- **Bank Statement Import:** Bulk import from bank CSV/PDF statements
-- **Investment Tracking:** Track mutual funds, stocks, and portfolio performance
-- **Multi-Currency Support:** Handle international transactions
-- **Mobile App:** Native iOS/Android apps with offline support
-
----
-
 <div align="center">
 <p><em>Built to make expense tracking effortless for India.</em></p>
 <p><strong>Track naturally. Understand instantly. Stay in control.</strong></p>
