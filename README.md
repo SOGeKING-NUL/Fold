@@ -10,14 +10,8 @@
 
 *Watch how Fold processes expenses from voice notes, UPI screenshots, and text messages—all in Hinglish.*
 
-> **[🎥 Demo Video 1: Voice Input]** `demo1.jpg`  
-> *"100 rupay ka chai piya" → Automatically categorized as Food, ₹100 expense*
-
-> **[🎥 Demo Video 2: UPI Screenshot]** `demo2.jpg`  
-> *Upload GPay payment screenshot → Extracts amount, merchant, payment method, bank account*
-
-> **[🎥 Demo Video 3: Receipt OCR]** `demo3.jpg`  
-> *Physical receipt photo → OCR + AI extracts all transaction details*
+> **[🎥 Full Demo Video Coming Soon]**  
+> *Complete walkthrough of all features: voice input, image processing, text extraction, account management, and reports*
 
 ---
 
@@ -51,11 +45,12 @@ Fold accepts expenses in **any format** you prefer—no forms, no dropdowns, jus
 "₹1,200 - Electricity bill - HDFC card"
 ```
 
+![Text Input Demo](assests/text.gif)
+
 **🎤 Voice Input:**
 Record voice notes in Hindi, English, or Hinglish. Fold uses OpenAI Whisper to transcribe and automatically extracts transaction details.
 
-> **[🎥 Voice Processing Demo]** `audio_demo1.ogg`  
-> *Speak naturally: "Aaj 250 rupay ka petrol bharwaya" → Categorized as Travel*
+![Voice Input Demo](assests/audio.gif)
 
 **📸 Image Input:**
 - UPI payment screenshots (GPay, PhonePe, Paytm, etc.)
@@ -64,8 +59,7 @@ Record voice notes in Hindi, English, or Hinglish. Fold uses OpenAI Whisper to t
 
 Fold automatically detects payment provider logos, extracts amounts, merchants, and payment methods using computer vision + OCR.
 
-> **[🖼️ Receipt Processing Demo]** `receipt.jpg`  
-> *Upload receipt → Amount: ₹1,234, Merchant: Big Bazaar, Category: Shopping*
+![Image Input Demo](assests/image.gif)
 
 ---
 
@@ -88,8 +82,7 @@ Fold's custom-trained NLP model understands the Indian payment ecosystem and Hin
 - **Accuracy:** ~94% category, ~98% payment method, ~91% bank account
 - **Languages:** English, Hindi, Hinglish (code-mixed)
 
-> **[🎥 NLP Classification Demo]** `demo4.jpg`  
-> *"Swiggy se khana mangaya 350 rupay" → Category: Food, Amount: ₹350, Method: UPI*
+![NLP Classification](assests/NLP%20Classification.jpg)
 
 ---
 
@@ -111,8 +104,7 @@ Fold automatically figures out **which account to charge** based on payment meth
 **Supported Payment Providers:**
 GPay, PhonePe, Paytm, BHIM, CRED, BharatPe, Amazon Pay, Slice, Jupiter, Fi, Niyo, Freecharge, Mobikwik
 
-> **[🖼️ Account Management]** `demo5.jpg`  
-> *Manage multiple bank accounts, credit cards, and UPI apps in one place*
+![Account Management](assests/accounts.jpg)
 
 ---
 
@@ -138,8 +130,12 @@ Fold implements **real double-entry bookkeeping**—the same system used by acco
 2. Application layer validates balance before every transaction
 3. Frontend shows clear error messages
 
-> **[🎥 Ledger System Demo]**  
-> *Every transaction shows: Amount, Category, Account charged, Journal ID*
+![Transaction History](assests/transactions.jpg)
+
+**Balance Validation:**
+Fold prevents overspending by validating account balances before processing transactions. If your bank balance is less than the expense amount, the transaction is rejected with a clear error message.
+
+![Balance Validation](assests/balance%20validation.jpg)
 
 ---
 
@@ -167,8 +163,7 @@ Get instant insights into your spending patterns with beautiful visualizations.
 - 🔝 Top expenses list
 - 📋 Transaction history table
 
-> **[🖼️ Dashboard Screenshot]**  
-> *Beautiful, responsive dashboard with real-time charts and insights*
+![Reports Dashboard](assests/report.gif)
 
 ---
 
