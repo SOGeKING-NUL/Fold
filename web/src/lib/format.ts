@@ -68,12 +68,14 @@ const CATEGORY_COLORS: Record<string, string> = {
   
   // Health & Fitness
   health: "#10b981",         // emerald
+  healthcare: "#10b981",     // emerald
   fitness: "#10b981",        // emerald
   medical: "#10b981",        // emerald
   
   // Investment & Savings
   investment: "#8b5cf6",     // purple
   savings: "#8b5cf6",        // purple
+  emi: "#ef4444",            // red (EMI/loan payments)
   
   // Friends & Social
   friends: "#f97316",        // orange
