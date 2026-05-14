@@ -4,17 +4,6 @@
 <p>Track expenses naturally—just speak, snap a receipt, or type. Fold understands Hinglish, extracts transaction details automatically, and maintains professional double-entry accounting. Built specifically for the Indian payment ecosystem.</p>
 </div>
 
----
-
-## 🚀 See Fold in Action
-
-*Watch how Fold processes expenses from voice notes, UPI screenshots, and text messages—all in Hinglish.*
-
-> **[🎥 Full Demo Video Coming Soon]**  
-> *Complete walkthrough of all features: voice input, image processing, text extraction, account management, and reports*
-
----
-
 ## 🏗️ How It Works (System Architecture)
 
 Fold uses a sophisticated multi-stage pipeline to extract financial data from any input modality. The system is built for ultra-low latency with synchronous processing—no queues, no polling, just instant results.
@@ -37,13 +26,6 @@ Fold isn't just an expense tracker—it's a complete financial management system
 ### 1. Multi-Modal Input Processing
 
 Fold accepts expenses in **any format** you prefer—no forms, no dropdowns, just natural input.
-
-**📝 Text Input:**
-```
-"Paid 450 for Swiggy order via GPay"
-"100 rupay ka chai piya"  (Hinglish)
-"₹1,200 - Electricity bill - HDFC card"
-```
 
 ![Text Input Demo](assests/text.gif)
 
