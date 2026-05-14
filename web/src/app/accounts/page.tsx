@@ -298,8 +298,8 @@ export default function AccountsPage() {
                                         )}
                                       </div>
                                     </div>
-                                  );
-                                })};
+                                  )
+                                })}
                               </div>
 
                               {cardAccounts.length > 1 && (

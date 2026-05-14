@@ -188,6 +188,17 @@ def ensure_schema() -> None:
                     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
                 );
 
+                -- Performance indexes for faster queries
+                CREATE INDEX IF NOT EXISTS idx_transactions_user_id ON transactions(user_id);
+                CREATE INDEX IF NOT EXISTS idx_transactions_occurred_at ON transactions(occurred_at DESC);
+                CREATE INDEX IF NOT EXISTS idx_transactions_user_occurred ON transactions(user_id, occurred_at DESC);
+                CREATE INDEX IF NOT EXISTS idx_transactions_account_id ON transactions(account_id);
+                CREATE INDEX IF NOT EXISTS idx_transactions_category ON transactions(category);
+                
+                CREATE INDEX IF NOT EXISTS idx_accounts_user_id ON accounts(user_id);
+                CREATE INDEX IF NOT EXISTS idx_accounts_is_default ON accounts(is_default);
+                
+                CREATE INDEX IF NOT EXISTS idx_payment_profiles_user_id ON payment_profiles(user_id);
             """)
         conn.commit()
 

@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Direct Frontend Test</title>
+    <style>
+        body {
+            font-family: monospace;
+            padding: 20px;
+            background: #1a1a1a;
+            color: #fff;
+        }
+        button {
+            padding: 10px 20px;
+            margin: 5px;
+            cursor: pointer;
+            background: #0d9488;
+            color: white;
+            border: none;
+            border-radius: 5px;
+        }
+        button:hover {
+            background: #0f766e;
+        }
+        #output {
+            background: #000;
+            padding: 20px;
+            border-radius: 5px;
+            margin-top: 20px;
+            white-space: pre-wrap;
+            max-height: 600px;
+            overflow-y: auto;
+        }
+        .success { color: #10b981; }
+        .error { color: #ef4444; }
+        .info { color: #3b82f6; }
+        input {
+            width: 100%;
+            padding: 10px;
+            margin: 10px 0;
+            background: #2a2a2a;
+            border: 1px solid #444;
+            color: #fff;
+            border-radius: 5px;
+        }
+    </style>
+</head>
+<body>
+    <h1>🧪 Direct Frontend Test</h1>
+    <p>This tests the backend directly from the browser (bypassing Next.js)</p>
+    
+    <div>
+        <h3>Step 1: Get your Clerk token</h3>
+        <p>Open http://localhost:3000/chat in another tab, then in console run:</p>
+        <code style="background: #2a2a2a; padding: 10px; display: block; margin: 10px 0;">
+            await window.Clerk.session.getToken()
+        </code>
+        <input type="text" id="tokenInput" placeholder="Paste your Clerk token here">
+    </div>
+
+    <div>
+        <h3>Step 2: Run Tests</h3>
+        <button onclick="testHealth()">Test Health</button>
+        <button onclick="testText()">Test Text (with token)</button>
+        <button onclick="testTextNoToken()">Test Text (no token)</button>
+        <button onclick="testLargeHeader()">Test Large Header</button>
+    </div>
+
+    <pre id="output"></pre>
+
+    <script>
+        const API_BASE = 'http://localhost:8000';
+        const output = document.getElementById('output');
+
+        function log(message, type = 'info') {
+            const timestamp = new Date().toLocaleTimeString();
+            const className = type === 'success' ? 'success' : type === 'error' ? 'error' : 'info';
+            output.innerHTML += `<span class="${className}">[${timestamp}] ${message}</span>\n`;
+            output.scrollTop = output.scrollHeight;
+        }
+
+        async function testHealth() {
+            output.innerHTML = '';
+            log('🧪 Testing health endpoint...', 'info');
+            
+            try {
+                const response = await fetch(`${API_BASE}/health`);
+                const data = await response.json();
+                log(`✅ Status: ${response.status}`, 'success');
+                log(`✅ Response: ${JSON.stringify(data, null, 2)}`, 'success');
+            } catch (error) {
+                log(`❌ Error: ${error.message}`, 'error');
+            }
+        }
+
+        async function testTextNoToken() {
+            output.innerHTML = '';
+            log('🧪 Testing text endpoint WITHOUT token (expect 401)...', 'info');
+            
+            try {
+                const response = await fetch(`${API_BASE}/api/v1/web/extract/text`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ text: 'spent 100 on coffee' })
+                });
+                
+                log(`Status: ${response.status}`, response.status === 401 ? 'success' : 'error');
+                const text = await response.text();
+                log(`Response: ${text}`, response.status === 401 ? 'success' : 'error');
+                
+                if (response.status === 401) {
+                    log('✅ Backend is working! (401 is expected without token)', 'success');
+                }
+            } catch (error) {
+                log(`❌ Error: ${error.message}`, 'error');
+                log(`❌ This might be a CORS or network issue`, 'error');
+            }
+        }
+
+        async function testText() {
+            output.innerHTML = '';
+            const token = document.getElementById('tokenInput').value.trim();
+            
+            if (!token) {
+                log('❌ Please paste your Clerk token first!', 'error');
+                return;
+            }
+            
+            log('🧪 Testing text endpoint WITH token...', 'info');
+            log(`Token length: ${token.length} characters`, 'info');
+            log(`Token preview: ${token.substring(0, 50)}...`, 'info');
+            log('', 'info');
+            
+            try {
+                log('📤 Sending request...', 'info');
+                const response = await fetch(`${API_BASE}/api/v1/web/extract/text`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${token}`
+                    },
+                    body: JSON.stringify({ text: 'spent 100 on coffee' })
+                });
+                
+                log(`📥 Response received`, 'info');
+                log(`Status: ${response.status}`, response.ok ? 'success' : 'error');
+                log(`Status Text: ${response.statusText}`, 'info');
+                log('', 'info');
+                
+                const text = await response.text();
+                log(`Response body:`, 'info');
+                log(text, response.ok ? 'success' : 'error');
+                
+                if (response.ok) {
+                    log('', 'info');
+                    log('✅✅✅ SUCCESS! Backend is working perfectly!', 'success');
+                    log('The issue must be in the Next.js frontend', 'info');
+                } else if (text.includes('header too large')) {
+                    log('', 'info');
+                    log('❌ "Header too large" error detected!', 'error');
+                    log('This is strange - Python tests showed headers work fine', 'error');
+                } else {
+                    log('', 'info');
+                    log(`⚠️  Got ${response.status} response`, 'error');
+                }
+            } catch (error) {
+                log('', 'info');
+                log(`❌ Fetch failed: ${error.message}`, 'error');
+                log(`❌ Error type: ${error.name}`, 'error');
+                log(`❌ This is a network/CORS/browser issue`, 'error');
+            }
+        }
+
+        async function testLargeHeader() {
+            output.innerHTML = '';
+            log('🧪 Testing with very large header (10KB)...', 'info');
+            
+            const largeToken = 'x'.repeat(10 * 1024);
+            log(`Fake token length: ${largeToken.length} characters`, 'info');
+            
+            try {
+                const response = await fetch(`${API_BASE}/api/v1/web/extract/text`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${largeToken}`
+                    },
+                    body: JSON.stringify({ text: 'test' })
+                });
+                
+                log(`Status: ${response.status}`, 'info');
+                const text = await response.text();
+                log(`Response: ${text.substring(0, 200)}`, 'info');
+                
+                if (text.includes('header too large')) {
+                    log('❌ Server rejected large header', 'error');
+                } else {
+                    log('✅ Server accepted large header (got 401 for invalid token)', 'success');
+                }
+            } catch (error) {
+                log(`❌ Error: ${error.message}`, 'error');
+            }
+        }
+
+        // Auto-run health check on load
+        window.onload = () => {
+            log('Page loaded. Click "Test Health" to verify backend is running.', 'info');
+        };
+    </script>
+</body>
+</html>

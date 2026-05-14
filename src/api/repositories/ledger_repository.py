@@ -340,3 +340,47 @@ class LedgerRepository:
             if not row:
                 raise ValueError("Transaction not found")
             return dict(row)
+
+    def update_account(self, account_id: int, new_data: dict) -> dict:
+        """Update an account's details."""
+        with get_db_connection() as conn:
+            with conn.cursor(row_factory=dict_row) as cur:
+                # Build UPDATE query dynamically based on provided fields
+                allowed_fields = ['name', 'account_type', 'institution_name', 'account_number_last4', 'balance']
+                updates = []
+                values = []
+                
+                for field in allowed_fields:
+                    if field in new_data:
+                        updates.append(f"{field} = %s")
+                        values.append(new_data[field])
+                
+                if not updates:
+                    raise ValueError("No fields to update")
+                
+                values.append(account_id)
+                query = f"UPDATE accounts SET {', '.join(updates)} WHERE id = %s RETURNING *"
+                
+                cur.execute(query, values)
+                result = cur.fetchone()
+                conn.commit()
+                return result
+
+    def delete_account(self, account_id: int) -> dict:
+        """Delete an account."""
+        with get_db_connection() as conn:
+            with conn.cursor(row_factory=dict_row) as cur:
+                # Check if account has transactions
+                cur.execute(
+                    "SELECT COUNT(*) as count FROM transactions WHERE account_id = %s OR to_account_id = %s",
+                    (account_id, account_id)
+                )
+                count = cur.fetchone()["count"]
+                
+                if count > 0:
+                    raise ValueError(f"Cannot delete account with {count} transactions. Archive it instead.")
+                
+                cur.execute("DELETE FROM accounts WHERE id = %s RETURNING *", (account_id,))
+                result = cur.fetchone()
+                conn.commit()
+                return result or {"status": "deleted"}

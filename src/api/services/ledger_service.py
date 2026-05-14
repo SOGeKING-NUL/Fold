@@ -386,3 +386,57 @@ class LedgerService:
             user_ref=user_ref, transaction_id=journal_id, new_category=new_category
         )
 
+    def update_account(self, user_ref: str, account_name: str, new_data: dict) -> dict:
+        """Update an existing account's details."""
+        user = self.user_repo.get_user_by_clerk_id(user_ref)
+        if not user:
+            raise ValueError("User not found")
+        
+        account = self.repository.get_account_by_name(user["id"], account_name)
+        if not account:
+            raise ValueError(f"Account {account_name} not found")
+        
+        return self.repository.update_account(account["id"], new_data)
+
+    def delete_account(self, user_ref: str, account_name: str) -> dict:
+        """Delete an account."""
+        user = self.user_repo.get_user_by_clerk_id(user_ref)
+        if not user:
+            raise ValueError("User not found")
+        
+        account = self.repository.get_account_by_name(user["id"], account_name)
+        if not account:
+            raise ValueError(f"Account {account_name} not found")
+        
+        return self.repository.delete_account(account["id"])
+
+    def add_funds_to_account(self, user_ref: str, account_name: str, amount_cents: int) -> dict:
+        """Add funds to a cash account."""
+        if amount_cents <= 0:
+            raise ValueError("Amount must be positive")
+        
+        user = self.user_repo.get_user_by_clerk_id(user_ref)
+        if not user:
+            raise ValueError("User not found")
+        
+        account = self.repository.get_account_by_name(user["id"], account_name)
+        if not account:
+            raise ValueError(f"Account {account_name} not found")
+        
+        if account["account_type"] != "cash":
+            raise ValueError("Can only add funds to cash accounts")
+        
+        # Create an income transaction for the added funds
+        txn = self.repository.create_transaction(
+            clerk_user_id=user_ref,
+            amount=amount_cents,
+            type="income",
+            category="cash_deposit",
+            description=f"Added funds to {account_name}",
+            account_id=account["id"],
+            to_account_id=None,
+            payment_profile_id=None,
+            source="manual_add_funds",
+        )
+        return txn
+

@@ -146,6 +146,42 @@ async def list_accounts(user_ref: str):
     return AccountListResponse(user_ref=user_ref, accounts=accounts)
 
 
+@router.put("/accounts/{user_ref}", response_model=LedgerPostResponse)
+async def update_account(user_ref: str, request: dict):
+    """Update an existing account's details."""
+    try:
+        account_name = request.get("account_name")
+        new_data = request.get("new_data")
+        
+        if not account_name or not new_data:
+            raise ValueError("account_name and new_data are required")
+        
+        result = ledger_service.update_account(user_ref, account_name, new_data)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return LedgerPostResponse(result=result)
+
+
+@router.delete("/accounts/{user_ref}", response_model=LedgerPostResponse)
+async def delete_account(user_ref: str, account_name: str = Query(...)):
+    """Delete an account."""
+    try:
+        result = ledger_service.delete_account(user_ref, account_name)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return LedgerPostResponse(result=result)
+
+
+@router.post("/accounts/{user_ref}/add-funds", response_model=LedgerPostResponse)
+async def add_funds_to_account(user_ref: str, account_name: str = Query(...), amount_cents: int = Query(...)):
+    """Add funds to a cash account."""
+    try:
+        result = ledger_service.add_funds_to_account(user_ref, account_name, amount_cents)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return LedgerPostResponse(result=result)
+
+
 @router.post("/primary-funding", response_model=LedgerPostResponse)
 async def set_primary_funding(request: PrimaryFundingRequest):
     try:
