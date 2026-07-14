@@ -2,7 +2,15 @@
 <h1>💰 Fold</h1>
 <p><strong>AI-Powered Multi-Modal Expense Tracking for India</strong></p>
 <p>Track expenses naturally—just speak, snap a receipt, or type. Fold understands Hinglish, extracts transaction details automatically, and maintains professional double-entry accounting. Built specifically for the Indian payment ecosystem.</p>
+
+<p>
+  <a href="https://fold-ai-one.vercel.app/"><strong>🚀 Live Demo</strong></a>
+</p>
+
+> [!WARNING]  
+> The backend hosted on Hugging Face Spaces is currently down. As a result, AI extraction, database operations, and other backend functionalities are unavailable. You can, however, still explore the static frontend interface.
 </div>
+
 
 ---
 
