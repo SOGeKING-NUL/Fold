@@ -30,19 +30,23 @@ export default function RootLayout({
     <ClerkProvider>
       <html lang="en" className={`${sans.variable} ${mono.variable} h-full antialiased`}>
         <body className="min-h-full flex flex-col font-sans">
-          <div className="w-full bg-yellow-400 text-black text-center py-2 px-4 text-xs sm:text-sm font-semibold select-none z-[9999]">
-            backend hosted on huggingface is down, please check sourcecode at{" "}
-            <a 
-              href="https://github.com/SOGeKING-NUL/Fold" 
-              target="_blank" 
-              rel="noopener noreferrer" 
-              className="underline hover:text-neutral-800"
-            >
-              github.com/SOGeKING-NUL/Fold
-            </a>
+          <div className="fixed top-0 left-0 right-0 z-50 flex flex-col">
+            <div className="w-full bg-yellow-400 text-black text-center py-2 px-4 text-xs sm:text-sm font-semibold select-none">
+              backend hosted on huggingface is down, please check sourcecode at{" "}
+              <a 
+                href="https://github.com/SOGeKING-NUL/Fold" 
+                target="_blank" 
+                rel="noopener noreferrer" 
+                className="underline hover:text-neutral-800"
+              >
+                github.com/SOGeKING-NUL/Fold
+              </a>
+            </div>
+            <Navbar />
           </div>
-          <Navbar />
-          {children}
+          <div className="flex-1 flex flex-col pt-9">
+            {children}
+          </div>
         </body>
       </html>
     </ClerkProvider>
