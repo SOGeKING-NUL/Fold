@@ -1,0 +1,14 @@
+venv/
+src/venv/
+web/node_modules/
+web/.next/
+.git/
+.github/
+.vscode/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.env
+.env.local
+*.log

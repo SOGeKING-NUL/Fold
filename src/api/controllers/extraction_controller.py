@@ -16,7 +16,6 @@ import os
 import sys
 import tempfile
 import logging
-import uuid
 from fastapi import APIRouter, UploadFile, File, HTTPException, Request, Depends
 from pydantic import BaseModel
 
@@ -25,8 +24,8 @@ if SRC_DIR not in sys.path:
     sys.path.insert(0, SRC_DIR)
 
 from api.middleware.clerk_auth import clerk_auth
-from api.repositories.user_repository import UserRepository
-from api.services.ledger_service import LedgerService, ExpenseRequest
+from api.repositories.user_repository import get_or_create_user_from_clerk
+from api.services import ledger_service
 from nlp.inference import TransactionExtractor
 from api.config import get_settings
 
@@ -34,8 +33,7 @@ _logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/v1/web/extract", tags=["web-extraction"])
 
-user_repo = UserRepository()
-ledger_service = LedgerService()
+
 
 # Lazy-loaded NLP engine (only needed for synchronous text extraction)
 _nlp: TransactionExtractor | None = None
@@ -71,7 +69,7 @@ async def get_current_user_info(request: Request) -> dict:
     """
     user_info = await clerk_auth.require_auth(request)
 
-    user = user_repo.get_or_create_user_from_clerk(
+    user = get_or_create_user_from_clerk(
         clerk_user_id=user_info["clerk_user_id"],
         email=user_info.get("email"),
         full_name=user_info.get("full_name"),
@@ -116,16 +114,14 @@ async def extract_and_save_text(
                 )
 
             ledger_result = ledger_service.post_expense(
-                ExpenseRequest(
-                    user_ref=user_ref,
-                    source="web_text",
-                    description=payload.text[:200],
-                    amount=extracted["amount"],
-                    category=extracted.get("category"),
-                    payment_method=extracted.get("payment_method"),
-                    payment_provider=extracted.get("payment_provider"),
-                    bank_hint=extracted.get("bank_account"),
-                )
+                user_ref=user_ref,
+                source="web_text",
+                description=payload.text[:200],
+                amount=extracted["amount"],
+                category=extracted.get("category"),
+                payment_method=extracted.get("payment_method"),
+                payment_provider=extracted.get("payment_provider"),
+                bank_hint=extracted.get("bank_account"),
             )
             message = f"Saved {extracted['category']} expense of ₹{extracted['amount']}"
         else:
@@ -177,13 +173,12 @@ async def extract_and_save_audio(
         
         try:
             # Import processing modules
-            from stt.transcriber import VoiceTranscriber
+            from stt.transcriber import transcribe_audio
             
             # Step 1: Transcribe audio → text
             _logger.info("  [1/3] Transcribing audio...")
-            stt = VoiceTranscriber(model_size="small")
-            stt_result = stt.process_audio(tmp_path)
-            transcript = stt_result["transcript"]
+            settings = get_settings()
+            transcript = transcribe_audio(tmp_path, api_key=settings.sarvam_api_key)
             _logger.info("    ✓ Transcript: %s", transcript[:100])
 
             # Step 2: Extract structured data from transcript
@@ -210,16 +205,14 @@ async def extract_and_save_audio(
                     )
 
                 ledger_result = ledger_service.post_expense(
-                    ExpenseRequest(
-                        user_ref=user_ref,
-                        source="web_audio",
-                        description=transcript[:200],
-                        amount=extracted["amount"],
-                        category=extracted.get("category"),
-                        payment_method=extracted.get("payment_method"),
-                        payment_provider=extracted.get("payment_provider"),
-                        bank_hint=extracted.get("bank_account"),
-                    )
+                    user_ref=user_ref,
+                    source="web_audio",
+                    description=transcript[:200],
+                    amount=extracted["amount"],
+                    category=extracted.get("category"),
+                    payment_method=extracted.get("payment_method"),
+                    payment_provider=extracted.get("payment_provider"),
+                    bank_hint=extracted.get("bank_account"),
                 )
                 message = f"Saved {extracted['category']} expense of ₹{extracted['amount']}"
                 _logger.info("    ✓ Journal #%s", ledger_result.get("journal_id"))
@@ -282,7 +275,6 @@ async def extract_and_save_image(
             # Import processing modules
             from ocr.extractor import ReceiptOCR
             from ocr.upi_detector import UPIAppDetector
-            from nlp.ollama_structurer import OllamaStructurer
             from nlp.inference import TransactionExtractor
             
             settings = get_settings()
@@ -301,42 +293,40 @@ async def extract_and_save_image(
             except Exception:
                 _logger.exception("    ✗ UPI detection failed, continuing")
 
-            # Step 2: OCR
+            # Step 2: OCR — extract raw text from the image
             _logger.info("  [2/5] OCR extraction...")
             ocr = ReceiptOCR()
             ocr_result = ocr.process_receipt(tmp_path, use_preprocessing=False)
             all_text = " ".join(ocr_result.get("all_lines", []))
-            ocr_parsed = ocr_result.get("parsed", {})
-            _logger.info("    ✓ Extracted %d lines", len(ocr_result.get("all_lines", [])))
+            print(f"    ✓ Extracted {len(ocr_result.get('all_lines', []))} lines")
+            
+            print("====== DEBUG: OCR RAW TEXT ======")
+            print(all_text)
+            print("=================================")
 
-            # Step 3: Ollama structuring (if enabled)
+            # Step 3: Groq structuring — let the LLM parse noisy OCR text
             text_source = "upi_ocr" if visual_provider else "receipt_ocr"
+            _logger.info("  [3/5] Extracting fields via Groq LLM...")
             llm_result = {}
-            if settings.ollama_enabled:
+            settings = get_settings()
+            if settings.groq_api_key:
                 try:
-                    _logger.info("  [3/5] Ollama structuring...")
-                    ollama = OllamaStructurer(
-                        base_url=settings.ollama_base_url,
-                        model=settings.ollama_model,
-                        timeout_seconds=settings.ollama_timeout_seconds,
-                    )
-                    llm_result = ollama.structure_from_ocr(
+                    from nlp.llm_structurer import structure_from_ocr
+                    llm_result = structure_from_ocr(
                         raw_text=all_text,
                         text_source=text_source,
-                        hints={
-                            "visual_provider": visual_provider,
-                            "ocr_amount": ocr_parsed.get("amount"),
-                            "ocr_payment_method": ocr_parsed.get("payment_method"),
-                            "ocr_payment_provider": ocr_parsed.get("payment_provider"),
-                            "instrument_last4": ocr_parsed.get("instrument_last4"),
-                            "instrument_institution_hint": ocr_parsed.get("instrument_institution_hint"),
-                        },
+                        api_key=settings.groq_api_key,
+                        hints={"visual_provider": visual_provider},
                     )
                     _logger.info("    ✓ Amount: %s", llm_result.get("amount"))
+                    
+                    print("====== DEBUG: GROQ OUTPUT ======")
+                    print(llm_result)
+                    print("================================")
                 except Exception:
-                    _logger.exception("    ✗ Ollama failed, continuing")
+                    _logger.exception("    ✗ Groq LLM structuring failed, continuing")
 
-            # Step 4: NLP extraction
+            # Step 4: NLP classification — get category from DistilBERT
             _logger.info("  [4/5] NLP classification...")
             preprocessed_text = all_text
             if llm_result:
@@ -358,11 +348,15 @@ async def extract_and_save_image(
             nlp = get_nlp()
             nlp_result = nlp.extract(preprocessed_text or "expense")
             _logger.info("    ✓ Category: %s", nlp_result.get("category"))
+            
+            print("====== DEBUG: NLP OUTPUT ======")
+            print(nlp_result)
+            print("===============================")
 
-            # Merge results
-            final_amount = llm_result.get("amount") or ocr_parsed.get("amount") or nlp_result.get("amount")
-            final_payment = llm_result.get("payment_method") or ocr_parsed.get("payment_method") or nlp_result.get("payment_method")
-            final_provider = visual_provider or llm_result.get("payment_provider") or ocr_parsed.get("payment_provider") or nlp_result.get("payment_provider")
+            # Merge results — LLM is primary for OCR fields, NLP for category
+            final_amount = llm_result.get("amount") or nlp_result.get("amount")
+            final_payment = llm_result.get("payment_method") or nlp_result.get("payment_method")
+            final_provider = visual_provider or llm_result.get("payment_provider") or nlp_result.get("payment_provider")
             final_bank = llm_result.get("bank_account") or nlp_result.get("bank_account")
 
             if final_provider and (not final_payment or final_payment == "unknown"):
@@ -374,11 +368,13 @@ async def extract_and_save_image(
                 "payment_method": final_payment,
                 "payment_provider": final_provider,
                 "bank_account": final_bank,
-                "receipt_account_last4": ocr_parsed.get("instrument_last4"),
-                "receipt_institution_hint": ocr_parsed.get("instrument_institution_hint"),
                 "ocr_text": all_text[:500],
                 "raw_text": all_text[:500],
             }
+            
+            print("====== DEBUG: FINAL EXTRACTED MERGED ======")
+            print(extracted)
+            print("===========================================")
 
             # Step 5: Save to ledger
             _logger.info("  [5/5] Saving to ledger...")
@@ -396,18 +392,14 @@ async def extract_and_save_image(
                     )
 
                 ledger_result = ledger_service.post_expense(
-                    ExpenseRequest(
-                        user_ref=user_ref,
-                        source="web_image",
-                        description=f"{extracted['category']} from receipt",
-                        amount=extracted["amount"],
-                        category=extracted.get("category"),
-                        payment_method=extracted.get("payment_method"),
-                        payment_provider=extracted.get("payment_provider"),
-                        bank_hint=extracted.get("bank_account"),
-                        receipt_account_last4=extracted.get("receipt_account_last4"),
-                        receipt_institution_hint=extracted.get("receipt_institution_hint"),
-                    )
+                    user_ref=user_ref,
+                    source="web_image",
+                    description=f"{extracted['category']} from receipt",
+                    amount=extracted["amount"],
+                    category=extracted.get("category"),
+                    payment_method=extracted.get("payment_method"),
+                    payment_provider=extracted.get("payment_provider"),
+                    bank_hint=extracted.get("bank_account"),
                 )
                 message = f"Saved {extracted['category']} expense of ₹{extracted['amount']}"
                 _logger.info("    ✓ Journal #%s", ledger_result.get("journal_id"))
@@ -433,4 +425,5 @@ async def extract_and_save_image(
     except Exception as e:
         _logger.exception("❌ [API] Image extraction failed")
         raise HTTPException(status_code=500, detail=str(e))
+
 

@@ -4,8 +4,8 @@ HOW TO RUN FOLD
 BACKEND:
 --------
 1. Activate virtual environment:
-   Windows: .\venv\Scripts\Activate.ps1
-   Linux/Mac: source venv/bin/activate
+   Windows: .\src\venv\Scripts\Activate.ps1
+   Linux/Mac: source src/venv/bin/activate
 
 2. Start server:
    uvicorn src.api.main:app --reload --port 8000

@@ -7,7 +7,6 @@ Endpoints:
     POST /api/v1/extract/text   — Extract from plain text (legacy/direct)
     POST /api/v1/extract/audio  — Extract from voice note (legacy/direct)
     POST /api/v1/extract/image  — Extract from receipt image (legacy/direct)
-    POST /api/v1/correct        — Save a category correction
 
     POST /api/v1/web/extract/text  — Clerk-auth text (synchronous, <1s)
     POST /api/v1/web/extract/audio — Clerk-auth audio (synchronous, ~3-5s)
@@ -32,6 +31,7 @@ _load_env_file()
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from api.routes import router
 from api.controllers.ledger_controller import router as ledger_router
 from api.controllers.web_controller import router as web_router
@@ -88,6 +88,13 @@ async def health_check():
     """Simple health check endpoint."""
     return {"status": "healthy", "service": "fold-extraction-api"}
 
+
+# ─── Static Files (Vanilla Frontend) ────────────────────────────────────
+# SRC_DIR is .../Apna-College/src
+# Project root is os.path.dirname(SRC_DIR)
+STATIC_DIR = os.path.join(os.path.dirname(SRC_DIR), "static")
+os.makedirs(STATIC_DIR, exist_ok=True)
+app.mount("/", StaticFiles(directory=STATIC_DIR, html=True), name="static")
 
 # ─── Direct Launch ──────────────────────────────────────────────────────
 if __name__ == "__main__":

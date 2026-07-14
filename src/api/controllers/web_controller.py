@@ -17,16 +17,13 @@ from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
 from api.middleware.clerk_auth import clerk_auth
-from api.repositories.user_repository import UserRepository
-from api.services.ledger_service import LedgerService
+from api.repositories.user_repository import get_or_create_user_from_clerk
+from api.repositories.ledger_repository import get_report_window_summary, get_breakdown
+from api.services import ledger_service
 
 _logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/v1/web", tags=["web-dashboard"])
-
-user_repo = UserRepository()
-ledger_service = LedgerService()
-
 
 # ── Shared auth dependency ─────────────────────────────────────────────
 # Every endpoint below uses this. It:
@@ -53,7 +50,7 @@ async def get_current_user(request: Request) -> dict:
         raise HTTPException(status_code=401, detail="Not authenticated")
 
     # Step 2: Find or create the user in our database
-    user = user_repo.get_or_create_user_from_clerk(
+    user = get_or_create_user_from_clerk(
         clerk_user_id=user_info["clerk_user_id"],
         email=user_info.get("email"),
         full_name=user_info.get("full_name"),
@@ -63,6 +60,7 @@ async def get_current_user(request: Request) -> dict:
     return {
         "user_ref": user_info["clerk_user_id"],
         "clerk_user_id": user_info["clerk_user_id"],
+        "user_id": user["id"],
         "email": user.get("email"),
         "full_name": user.get("full_name"),
     }
@@ -101,22 +99,25 @@ async def get_dashboard(
     Returns summary totals, breakdowns, balances, and recent transactions.
     """
     user_ref = user["user_ref"]
+    user_id = user["user_id"]
 
     now = datetime.utcnow()
     days = 7 if period == "weekly" else max(1, now.day)
 
-    summary = ledger_service.repository.get_report_window_summary(user_ref, days=days)
-    income = int(summary["income_minor"])
-    expense = int(summary["expense_minor"])
-    net = income - expense
+    from api.db.connection import get_db_connection
+    with get_db_connection() as conn:
+        summary = get_report_window_summary(user_id, days=days, conn=conn)
+        income = int(summary["income_minor"])
+        expense = int(summary["expense_minor"])
+        net = income - expense
 
-    by_category = ledger_service.repository.get_breakdown(user_ref, days=days, group_by="category")
-    by_payment_method = ledger_service.repository.get_breakdown(user_ref, days=days, group_by="payment_method")
-    by_account = ledger_service.repository.get_breakdown(user_ref, days=days, group_by="account")
+        by_category = get_breakdown(user_id, days=days, group_by="category", conn=conn)
+        by_payment_method = get_breakdown(user_id, days=days, group_by="payment_method", conn=conn)
+        by_account = get_breakdown(user_id, days=days, group_by="account", conn=conn)
 
-    accounts = ledger_service.list_accounts(user_ref)
-    tx_result = ledger_service.get_transactions(user_ref, limit=20, offset=0)
-    transactions = tx_result.get("rows", []) if isinstance(tx_result, dict) else tx_result
+        accounts = ledger_service.list_accounts(user_ref)
+        tx_result = ledger_service.get_transactions(user_ref, limit=20, offset=0)
+        transactions = tx_result.get("rows", []) if isinstance(tx_result, dict) else tx_result
 
     period_label = (
         "Last 7 days"

@@ -1,442 +1,463 @@
-from dataclasses import dataclass
 from datetime import datetime
 from typing import Literal
 import logging
 
 from api.config import get_settings
-from api.repositories.ledger_repository import LedgerRepository
-from api.repositories.user_repository import UserRepository
+from api.repositories.ledger_repository import (
+    get_or_create_account,
+    get_account_by_name,
+    set_account_as_default,
+    list_accounts as repo_list_accounts,
+    list_accounts_by_user_id,
+    get_payment_profile_by_provider,
+    get_default_account_for_type,
+    get_account_by_id,
+    create_transaction,
+    create_payment_profile,
+    list_payment_profiles as repo_list_payment_profiles,
+    get_report_window_summary,
+    get_breakdown,
+    get_transactions as repo_get_transactions,
+    reassign_expense_category as repo_reassign_expense_category,
+)
+from api.repositories.user_repository import (
+    get_or_create_user_from_clerk,
+    get_user_by_clerk_id,
+    set_default_account as set_user_default_account,
+)
 
 _logger = logging.getLogger(__name__)
 
 
-AccountType = Literal["cash", "bank", "credit"]
+def _to_minor(amount: float) -> int:
+    amount_minor = int(round(amount * 100))
+    if amount_minor <= 0:
+        raise ValueError("Amount must be positive")
+    cap = get_settings().max_transaction_inr
+    if amount > cap:
+        raise ValueError(
+            f"Amount ₹{amount:,.2f} exceeds the single-transaction limit of ₹{cap:,.2f}. "
+            "If this is real, adjust MAX_TRANSACTION_INR."
+        )
+    return amount_minor
 
 
-@dataclass
-class AccountUpsertRequest:
-    user_ref: str
-    name: str
-    account_type: AccountType
-    institution_name: str | None = None
-    account_number_last4: str | None = None
-
-
-@dataclass
-class PaymentProfileUpsertRequest:
-    user_ref: str
-    provider: str
-    profile_name: str
-    linked_account_name: str
-
-
-@dataclass
-class ExpenseRequest:
-    user_ref: str
-    source: str
-    description: str
-    amount: float
-    funding_account_name: str | None = None
-    external_ref: str | None = None
-    occurred_at: str | None = None
-    category: str | None = None
-    payment_method: str | None = None
-    payment_provider: str | None = None
-    receipt_account_last4: str | None = None
-    receipt_institution_hint: str | None = None
-    bank_hint: str | None = None
-
-
-@dataclass
-class IncomeRequest:
-    user_ref: str
-    source: str
-    description: str
-    amount: float
-    destination_account_name: str | None = None
-    external_ref: str | None = None
-    occurred_at: str | None = None
-    category: str | None = None
-    payment_method: str | None = None
-
-
-@dataclass
-class TransferRequest:
-    user_ref: str
-    source: str
-    description: str
-    amount: float
-    from_account_name: str
-    to_account_name: str
-    external_ref: str | None = None
-    occurred_at: str | None = None
-
-
-@dataclass
-class OpeningBalanceRequest:
-    user_ref: str
-    source: str
-    account_name: str
-    amount: float
-    external_ref: str | None = None
-    occurred_at: str | None = None
-
-
-class LedgerService:
-    def __init__(self, repository: LedgerRepository | None = None, user_repo: UserRepository | None = None) -> None:
-        self.repository = repository or LedgerRepository()
-        self.user_repo = user_repo or UserRepository()
-
-    @staticmethod
-    def _to_minor(amount: float) -> int:
-        amount_minor = int(round(amount * 100))
-        if amount_minor <= 0:
-            raise ValueError("Amount must be positive")
-        cap = get_settings().max_transaction_inr
-        if amount > cap:
-            raise ValueError(
-                f"Amount ₹{amount:,.2f} exceeds the single-transaction limit of ₹{cap:,.2f}. "
-                "If this is real, adjust MAX_TRANSACTION_INR."
-            )
-        return amount_minor
-
-    def upsert_account(self, payload: AccountUpsertRequest) -> dict:
-        user = self.user_repo.get_or_create_user_from_clerk(payload.user_ref)
-        account_last4 = payload.account_number_last4
+def upsert_account(
+    user_ref: str,
+    name: str,
+    account_type: Literal["cash", "bank", "credit"],
+    institution_name: str | None = None,
+    account_number_last4: str | None = None,
+) -> dict:
+    user = get_or_create_user_from_clerk(user_ref)
+    account_last4 = account_number_last4
+    
+    # For cash wallets, institution and last4 are optional
+    if account_type == "cash":
+        account_last4 = None
+        institution = institution_name or "Cash"
+    else:
+        institution = institution_name
+        if account_last4 is not None:
+            account_last4 = "".join(ch for ch in account_last4 if ch.isdigit())
+            if len(account_last4) != 4:
+                raise ValueError("account_number_last4 must contain exactly 4 digits")
+    
+    account = get_or_create_account(
+        user_id=int(user["id"]),
+        name=name,
+        account_type=account_type,
+        institution_name=institution,
+        account_number_last4=account_last4,
+    )
+    # If this is the first account, make it default
+    if not user.get("default_account_id"):
+        set_user_default_account(user_ref, account["id"])
         
-        # For cash wallets, institution and last4 are optional
-        if payload.account_type == "cash":
-            account_last4 = None
-            institution = payload.institution_name or "Cash"
+    return account
+
+
+def ensure_cash_wallet_account(user_ref: str) -> dict:
+    return upsert_account(
+        user_ref=user_ref,
+        name="Physical Cash",
+        account_type="cash",
+        institution_name="Cash",
+    )
+
+
+def set_primary_funding_account(user_ref: str, account_name: str) -> dict:
+    user = get_or_create_user_from_clerk(user_ref)
+    account = get_account_by_name(user["id"], account_name)
+    if not account:
+        raise ValueError(f"Account {account_name} not found.")
+    set_user_default_account(user_ref, account["id"])
+    return {"primary_funding_name": account_name}
+
+
+def set_default_account(user_ref: str, account_name: str) -> dict:
+    """Set an account as the default for its type (cash/bank/credit)."""
+    user = get_user_by_clerk_id(user_ref)
+    if not user:
+        raise ValueError("User not found")
+    
+    account = get_account_by_name(user["id"], account_name)
+    if not account:
+        raise ValueError(f"Account {account_name} not found")
+    
+    return set_account_as_default(user["id"], account["id"])
+
+
+def list_accounts(user_ref: str) -> list[dict]:
+    return repo_list_accounts(user_ref)
+
+
+def _find_account_by_hint(user_id: int, hint: str) -> dict | None:
+    """
+    Find account by fuzzy matching on bank hint.
+    Matches against account name and institution name (case-insensitive, partial match).
+    """
+    all_accounts = list_accounts_by_user_id(user_id)
+    hint_lower = hint.lower().strip()
+    
+    # First try exact match on name
+    for acc in all_accounts:
+        if acc["name"].lower() == hint_lower:
+            return acc
+    
+    # Then try partial match on name or institution
+    for acc in all_accounts:
+        name_lower = acc["name"].lower()
+        inst_lower = (acc.get("institution_name") or "").lower()
+        
+        # Check if hint is contained in name or institution
+        if hint_lower in name_lower or hint_lower in inst_lower:
+            _logger.info(f"Fuzzy matched bank hint '{hint}' to account '{acc['name']}'")
+            return acc
+    
+    return None
+
+
+def post_expense(
+    user_ref: str,
+    source: str,
+    description: str,
+    amount: float,
+    funding_account_name: str | None = None,
+    external_ref: str | None = None,
+    occurred_at: str | None = None,
+    category: str | None = None,
+    payment_method: str | None = None,
+    payment_provider: str | None = None,
+    receipt_account_last4: str | None = None,
+    receipt_institution_hint: str | None = None,
+    bank_hint: str | None = None,
+) -> dict:
+    amount_minor = _to_minor(amount)
+    user = get_user_by_clerk_id(user_ref)
+    if not user:
+        raise ValueError("User not found")
+
+    account_id = None
+    payment_profile_id = None
+    resolved_method = "unknown"
+    resolved_account_name = "unknown"
+
+    _logger.info("="*80)
+    _logger.info(f"[ExpenseResolution] Starting account resolution for user {user_ref}")
+    _logger.info(f"  INPUT DATA:")
+    _logger.info(f"    - description: {description}")
+    _logger.info(f"    - amount: {amount}")
+    _logger.info(f"    - payment_method: {payment_method}")
+    _logger.info(f"    - payment_provider: {payment_provider}")
+    _logger.info(f"    - bank_hint: {bank_hint}")
+    _logger.info(f"    - funding_account_name: {funding_account_name}")
+    _logger.info(f"    - category: {category}")
+
+    all_accounts = list_accounts_by_user_id(user["id"])
+    _logger.info(f"  AVAILABLE ACCOUNTS:")
+    for acc in all_accounts:
+        _logger.info(f"    - {acc['name']} (type={acc['account_type']}, institution={acc.get('institution_name')}, is_default={acc.get('is_default')})")
+
+    # Priority 1: Explicit funding account name
+    if funding_account_name:
+        _logger.info(f"  [Priority 1] Checking explicit funding_account_name: {funding_account_name}")
+        acc = get_account_by_name(user["id"], funding_account_name)
+        if acc:
+            account_id = acc["id"]
+            resolved_method = "explicit_funding_account"
+            resolved_account_name = acc["name"]
+            _logger.info(f"    ✓ MATCHED: {acc['name']} (id={acc['id']})")
         else:
-            institution = payload.institution_name
-            if account_last4 is not None:
-                account_last4 = "".join(ch for ch in account_last4 if ch.isdigit())
-                if len(account_last4) != 4:
-                    raise ValueError("account_number_last4 must contain exactly 4 digits")
-        
-        account = self.repository.get_or_create_account(
-            user_id=int(user["id"]),
-            name=payload.name,
-            account_type=payload.account_type,
-            institution_name=institution,
-            account_number_last4=account_last4,
-        )
-        # If this is the first account, make it default
-        if not user.get("default_account_id"):
-            self.user_repo.set_default_account(payload.user_ref, account["id"])
-            
-        return account
-
-    def ensure_cash_wallet_account(self, user_ref: str) -> dict:
-        return self.upsert_account(
-            AccountUpsertRequest(
-                user_ref=user_ref,
-                name="Physical Cash",
-                account_type="cash",
-                institution_name="Cash",
-            )
-        )
-
-    def set_primary_funding_account(self, user_ref: str, account_name: str) -> dict:
-        user = self.user_repo.get_or_create_user_from_clerk(user_ref)
-        account = self.repository.get_account_by_name(user["id"], account_name)
-        if not account:
-            raise ValueError(f"Account {account_name} not found.")
-        self.user_repo.set_default_account(user_ref, account["id"])
-        return {"primary_funding_name": account_name}
-
-    def set_default_account(self, user_ref: str, account_name: str) -> dict:
-        """Set an account as the default for its type (cash/bank/credit)."""
-        user = self.user_repo.get_user_by_clerk_id(user_ref)
-        if not user:
-            raise ValueError("User not found")
-        
-        account = self.repository.get_account_by_name(user["id"], account_name)
-        if not account:
-            raise ValueError(f"Account {account_name} not found")
-        
-        return self.repository.set_account_as_default(user["id"], account["id"])
-
-    def list_accounts(self, user_ref: str) -> list[dict]:
-        return self.repository.list_accounts(user_ref)
-
-    def post_expense(self, payload: ExpenseRequest) -> dict:
-        amount_minor = self._to_minor(payload.amount)
-        user = self.user_repo.get_user_by_clerk_id(payload.user_ref)
-        if not user:
-            raise ValueError("User not found")
-
-        account_id = None
-        payment_profile_id = None
-
-        # Priority 1: Explicit funding account name
-        if payload.funding_account_name:
-            acc = self.repository.get_account_by_name(user["id"], payload.funding_account_name)
+            _logger.info(f"    ✗ NO MATCH")
+    
+    # Priority 2: Bank hint (from NLP or OCR)
+    if not account_id and bank_hint:
+        hint_lower = bank_hint.lower().strip()
+        _logger.info(f"  [Priority 2] Checking bank_hint: '{bank_hint}'")
+        if hint_lower == "cash":
+            acc = _find_account_by_hint(user["id"], "cash")
+            if not acc:
+                acc = ensure_cash_wallet_account(user_ref)
+            account_id = acc["id"]
+            resolved_method = "bank_hint_cash"
+            resolved_account_name = acc["name"]
+        else:
+            acc = _find_account_by_hint(user["id"], bank_hint)
             if acc:
                 account_id = acc["id"]
+                resolved_method = "bank_hint_fuzzy"
+                resolved_account_name = acc["name"]
+    
+    # Priority 3: Payment provider (UPI app)
+    if not account_id and payment_provider:
+        pp = get_payment_profile_by_provider(user_ref, payment_provider)
+        if pp:
+            payment_profile_id = pp["id"]
+            account_id = pp["linked_account_id"]
+            resolved_method = "payment_provider"
+            resolved_account_name = f"profile:{pp.get('profile_name', 'unknown')}"
+    
+    # Priority 4: Payment method type
+    if not account_id and payment_method:
+        method_to_type = {"cash": "cash", "upi": "bank", "card": "credit"}
+        account_type = method_to_type.get(payment_method)
+        if account_type:
+            default_acc = get_default_account_for_type(user["id"], account_type)
+            if default_acc:
+                account_id = default_acc["id"]
+                resolved_method = f"default_{account_type}_account"
+                resolved_account_name = default_acc["name"]
+    
+    # Priority 5: User's global default account
+    if not account_id and user.get("default_account_id"):
+        account_id = user["default_account_id"]
+        resolved_method = "global_default"
+        acc = get_account_by_id(user["id"], account_id)
+        if acc:
+            resolved_account_name = acc["name"]
         
-        # Priority 2: Payment provider (UPI app) → linked account
-        # This ensures GPay detection charges the GPay-linked account, not primary
-        if not account_id and payload.payment_provider:
-            pp = self.repository.get_payment_profile_by_provider(payload.user_ref, payload.payment_provider)
-            if pp:
-                payment_profile_id = pp["id"]
-                account_id = pp["linked_account_id"]
-                _logger.info(f"Resolved payment provider '{payload.payment_provider}' to account ID {account_id}")
+    if not account_id:
+        raise ValueError("Could not determine funding source. Please set a default account or link a payment profile.")
+    
+    _logger.info(f"  ✅ FINAL RESOLUTION: {resolved_account_name} ({resolved_method})")
+    
+    txn = create_transaction(
+        clerk_user_id=user_ref,
+        amount=amount_minor,
+        type="expense",
+        category=category or "expense",
+        description=description,
+        account_id=account_id,
+        to_account_id=None,
+        payment_profile_id=payment_profile_id,
+        source=source,
+    )
+    
+    txn["_resolution_method"] = resolved_method
+    txn["_resolved_account_name"] = resolved_account_name
+    txn["_resolved_account_id"] = account_id
+    
+    return txn
+
+
+def post_income(
+    user_ref: str,
+    source: str,
+    description: str,
+    amount: float,
+    destination_account_name: str | None = None,
+    external_ref: str | None = None,
+    occurred_at: str | None = None,
+    category: str | None = None,
+    payment_method: str | None = None,
+) -> dict:
+    amount_minor = _to_minor(amount)
+    user = get_user_by_clerk_id(user_ref)
+    if not user:
+        raise ValueError("User not found")
+
+    account_id = None
+    if destination_account_name:
+        acc = get_account_by_name(user["id"], destination_account_name)
+        if acc:
+            account_id = acc["id"]
+    
+    if not account_id and user.get("default_account_id"):
+        account_id = user["default_account_id"]
+
+    if not account_id:
+        raise ValueError("Could not determine destination account.")
+
+    txn = create_transaction(
+        clerk_user_id=user_ref,
+        amount=amount_minor,
+        type="income",
+        category=category or "income",
+        description=description,
+        account_id=account_id,
+        to_account_id=None,
+        payment_profile_id=None,
+        source=source,
+    )
+    return txn
+
+
+def post_transfer(
+    user_ref: str,
+    source: str,
+    description: str,
+    amount: float,
+    from_account_name: str,
+    to_account_name: str,
+    external_ref: str | None = None,
+    occurred_at: str | None = None,
+) -> dict:
+    amount_minor = _to_minor(amount)
+    user = get_user_by_clerk_id(user_ref)
+    if not user:
+        raise ValueError("User not found")
+
+    from_acc = get_account_by_name(user["id"], from_account_name)
+    to_acc = get_account_by_name(user["id"], to_account_name)
+    
+    if not from_acc or not to_acc:
+        raise ValueError("Transfer accounts not found")
+
+    txn = create_transaction(
+        clerk_user_id=user_ref,
+        amount=amount_minor,
+        type="transfer",
+        category="transfer",
+        description=description,
+        account_id=from_acc["id"],
+        to_account_id=to_acc["id"],
+        payment_profile_id=None,
+        source=source,
+    )
+    return txn
+
+
+def post_opening_balance(
+    user_ref: str,
+    source: str,
+    account_name: str,
+    amount: float,
+    external_ref: str | None = None,
+    occurred_at: str | None = None,
+) -> dict:
+    amount_minor = _to_minor(amount)
+    user = get_user_by_clerk_id(user_ref)
+    if not user:
+        raise ValueError("User not found")
+
+    acc = get_account_by_name(user["id"], account_name)
+    if not acc:
+        raise ValueError("Account not found")
+
+    txn = create_transaction(
+        clerk_user_id=user_ref,
+        amount=amount_minor,
+        type="opening_balance",
+        category="opening_balance",
+        description=f"Opening balance for {account_name}",
+        account_id=acc["id"],
+        to_account_id=None,
+        payment_profile_id=None,
+        source=source,
+    )
+    return txn
+
+
+def upsert_payment_profile(
+    user_ref: str,
+    provider: str,
+    profile_name: str,
+    linked_account_name: str,
+) -> dict:
+    user = get_user_by_clerk_id(user_ref)
+    if not user:
+        raise ValueError("User not found")
         
-        # Priority 3: Bank hint (from NLP or OCR)
-        if not account_id and payload.bank_hint:
-            if payload.bank_hint.lower() == "cash":
-                cash_acc = self.ensure_cash_wallet_account(payload.user_ref)
-                account_id = cash_acc["id"]
-            else:
-                acc = self.repository.get_account_by_name(user["id"], payload.bank_hint)
-                if acc:
-                    account_id = acc["id"]
+    acc = get_account_by_name(user["id"], linked_account_name)
+    if not acc:
+        raise ValueError("Linked account not found")
         
-        # Priority 4: Default account for payment method type
-        if not account_id and payload.payment_method:
-            method_to_type = {"cash": "cash", "upi": "bank", "card": "credit"}
-            account_type = method_to_type.get(payload.payment_method)
-            if account_type:
-                default_acc = self.repository.get_default_account_for_type(user["id"], account_type)
-                if default_acc:
-                    account_id = default_acc["id"]
-                    _logger.info(f"Using default {account_type} account: {default_acc['name']}")
-        
-        # Priority 5: User's global default account
-        if not account_id and user.get("default_account_id"):
-            account_id = user["default_account_id"]
-            
-        if not account_id:
-            raise ValueError("Could not determine funding source. Please set a default account or link a payment profile.")
+    return create_payment_profile(
+        clerk_user_id=user_ref,
+        provider=provider,
+        profile_name=profile_name,
+        linked_account_id=acc["id"]
+    )
 
-        txn = self.repository.create_transaction(
-            clerk_user_id=payload.user_ref,
-            amount=amount_minor,
-            type="expense",
-            category=payload.category or "expense",
-            description=payload.description,
-            account_id=account_id,
-            to_account_id=None,
-            payment_profile_id=payment_profile_id,
-            source=payload.source,
-        )
-        return txn
 
-    def post_income(self, payload: IncomeRequest) -> dict:
-        amount_minor = self._to_minor(payload.amount)
-        user = self.user_repo.get_user_by_clerk_id(payload.user_ref)
-        if not user:
-            raise ValueError("User not found")
+def list_payment_profiles(user_ref: str) -> list[dict]:
+    return repo_list_payment_profiles(user_ref)
 
-        account_id = None
-        if payload.destination_account_name:
-            acc = self.repository.get_account_by_name(user["id"], payload.destination_account_name)
-            if acc:
-                account_id = acc["id"]
-        
-        if not account_id and user.get("default_account_id"):
-            account_id = user["default_account_id"]
 
-        if not account_id:
-            raise ValueError("Could not determine destination account.")
+def get_weekly_report(user_ref: str) -> dict:
+    summary = get_report_window_summary(user_ref, days=7)
+    return {
+        "period": "weekly",
+        "window_days": 7,
+        "income_minor": int(summary["income_minor"]),
+        "expense_minor": int(summary["expense_minor"]),
+        "net_cashflow_minor": int(summary["income_minor"]) - int(summary["expense_minor"]),
+    }
 
-        txn = self.repository.create_transaction(
-            clerk_user_id=payload.user_ref,
-            amount=amount_minor,
-            type="income",
-            category=payload.category or "income",
-            description=payload.description,
-            account_id=account_id,
-            to_account_id=None,
-            payment_profile_id=None,
-            source=payload.source,
-        )
-        return txn
 
-    def post_transfer(self, payload: TransferRequest) -> dict:
-        amount_minor = self._to_minor(payload.amount)
-        user = self.user_repo.get_user_by_clerk_id(payload.user_ref)
-        if not user:
-            raise ValueError("User not found")
+def get_monthly_report(user_ref: str) -> dict:
+    now = datetime.utcnow()
+    days_in_scope = max(1, now.day)
+    summary = get_report_window_summary(user_ref, days=days_in_scope)
+    return {
+        "period": "monthly",
+        "month": now.strftime("%Y-%m"),
+        "income_minor": int(summary["income_minor"]),
+        "expense_minor": int(summary["expense_minor"]),
+        "net_cashflow_minor": int(summary["income_minor"]) - int(summary["expense_minor"]),
+    }
 
-        from_acc = self.repository.get_account_by_name(user["id"], payload.from_account_name)
-        to_acc = self.repository.get_account_by_name(user["id"], payload.to_account_name)
-        
-        if not from_acc or not to_acc:
-            raise ValueError("Transfer accounts not found")
 
-        txn = self.repository.create_transaction(
-            clerk_user_id=payload.user_ref,
-            amount=amount_minor,
-            type="transfer",
-            category="transfer",
-            description=payload.description,
-            account_id=from_acc["id"],
-            to_account_id=to_acc["id"],
-            payment_profile_id=None,
-            source=payload.source,
-        )
-        return txn
+def get_enriched_period_report(user_ref: str, mode: Literal["weekly", "monthly"]) -> dict:
+    now = datetime.utcnow()
+    if mode == "weekly":
+        days = 7
+        title = "Weekly report"
+        range_hint = f"Rolling {days}-day window ending {now.strftime('%d %b %Y, %H:%M')} UTC."
+    else:
+        days = max(1, now.day)
+        title = f"Monthly report · {now.strftime('%B %Y')}"
+        range_hint = f"Rolling {days}-day window ending {now.strftime('%d %b %Y, %H:%M')} UTC."
 
-    def post_opening_balance(self, payload: OpeningBalanceRequest) -> dict:
-        amount_minor = self._to_minor(payload.amount)
-        user = self.user_repo.get_user_by_clerk_id(payload.user_ref)
-        if not user:
-            raise ValueError("User not found")
+    summary = get_report_window_summary(user_ref, days=days)
+    income = int(summary["income_minor"])
+    expense = int(summary["expense_minor"])
+    net = income - expense
 
-        acc = self.repository.get_account_by_name(user["id"], payload.account_name)
-        if not acc:
-            raise ValueError("Account not found")
+    by_category = get_breakdown(user_ref, days=days, group_by="category")
+    by_payment = get_breakdown(user_ref, days=days, group_by="payment_method")
 
-        txn = self.repository.create_transaction(
-            clerk_user_id=payload.user_ref,
-            amount=amount_minor,
-            type="opening_balance",
-            category="opening_balance",
-            description=f"Opening balance for {payload.account_name}",
-            account_id=acc["id"],
-            to_account_id=None,
-            payment_profile_id=None,
-            source=payload.source,
-        )
-        return txn
+    return {
+        "mode": mode,
+        "title": title,
+        "range_hint": range_hint,
+        "window_days": days,
+        "income_minor": income,
+        "expense_minor": expense,
+        "investment_minor": 0,
+        "net_cashflow_minor": net,
+        "by_category": list(by_category),
+        "by_payment_method": list(by_payment),
+    }
 
-    def upsert_payment_profile(self, payload: PaymentProfileUpsertRequest) -> dict:
-        user = self.user_repo.get_user_by_clerk_id(payload.user_ref)
-        if not user:
-            raise ValueError("User not found")
-            
-        acc = self.repository.get_account_by_name(user["id"], payload.linked_account_name)
-        if not acc:
-            raise ValueError("Linked account not found")
-            
-        return self.repository.create_payment_profile(
-            clerk_user_id=payload.user_ref,
-            provider=payload.provider,
-            profile_name=payload.profile_name,
-            linked_account_id=acc["id"]
-        )
 
-    def list_payment_profiles(self, user_ref: str) -> list[dict]:
-        return self.repository.list_payment_profiles(user_ref)
+def get_transactions(user_ref: str, limit: int = 50, offset: int = 0) -> dict:
+    rows = repo_get_transactions(user_ref, limit=limit, offset=offset)
+    return {"limit": limit, "offset": offset, "rows": rows}
 
-    def get_weekly_report(self, user_ref: str) -> dict:
-        summary = self.repository.get_report_window_summary(user_ref, days=7)
-        return {
-            "period": "weekly",
-            "window_days": 7,
-            "income_minor": int(summary["income_minor"]),
-            "expense_minor": int(summary["expense_minor"]),
-            "net_cashflow_minor": int(summary["income_minor"]) - int(summary["expense_minor"]),
-        }
 
-    def get_monthly_report(self, user_ref: str) -> dict:
-        now = datetime.utcnow()
-        days_in_scope = max(1, now.day)
-        summary = self.repository.get_report_window_summary(user_ref, days=days_in_scope)
-        return {
-            "period": "monthly",
-            "month": now.strftime("%Y-%m"),
-            "income_minor": int(summary["income_minor"]),
-            "expense_minor": int(summary["expense_minor"]),
-            "net_cashflow_minor": int(summary["income_minor"]) - int(summary["expense_minor"]),
-        }
-
-    def get_enriched_period_report(self, user_ref: str, mode: Literal["weekly", "monthly"]) -> dict:
-        now = datetime.utcnow()
-        if mode == "weekly":
-            days = 7
-            title = "Weekly report"
-            range_hint = f"Rolling {days}-day window ending {now.strftime('%d %b %Y, %H:%M')} UTC."
-        else:
-            days = max(1, now.day)
-            title = f"Monthly report · {now.strftime('%B %Y')}"
-            range_hint = f"Rolling {days}-day window ending {now.strftime('%d %b %Y, %H:%M')} UTC."
-
-        summary = self.repository.get_report_window_summary(user_ref, days=days)
-        income = int(summary["income_minor"])
-        expense = int(summary["expense_minor"])
-        net = income - expense
-
-        by_category = self.repository.get_breakdown(user_ref, days=days, group_by="category")
-        by_payment = self.repository.get_breakdown(user_ref, days=days, group_by="payment_method")
-
-        return {
-            "mode": mode,
-            "title": title,
-            "range_hint": range_hint,
-            "window_days": days,
-            "income_minor": income,
-            "expense_minor": expense,
-            "investment_minor": 0,
-            "net_cashflow_minor": net,
-            "by_category": list(by_category),
-            "by_payment_method": list(by_payment),
-        }
-
-    def get_transactions(self, user_ref: str, limit: int = 50, offset: int = 0) -> dict:
-        rows = self.repository.get_transactions(user_ref, limit=limit, offset=offset)
-        return {"limit": limit, "offset": offset, "rows": rows}
-
-    def reassign_expense_category(self, user_ref: str, journal_id: int, new_category: str) -> dict:
-        return self.repository.reassign_expense_category(
-            user_ref=user_ref, transaction_id=journal_id, new_category=new_category
-        )
-
-    def update_account(self, user_ref: str, account_name: str, new_data: dict) -> dict:
-        """Update an existing account's details."""
-        user = self.user_repo.get_user_by_clerk_id(user_ref)
-        if not user:
-            raise ValueError("User not found")
-        
-        account = self.repository.get_account_by_name(user["id"], account_name)
-        if not account:
-            raise ValueError(f"Account {account_name} not found")
-        
-        return self.repository.update_account(account["id"], new_data)
-
-    def delete_account(self, user_ref: str, account_name: str) -> dict:
-        """Delete an account."""
-        user = self.user_repo.get_user_by_clerk_id(user_ref)
-        if not user:
-            raise ValueError("User not found")
-        
-        account = self.repository.get_account_by_name(user["id"], account_name)
-        if not account:
-            raise ValueError(f"Account {account_name} not found")
-        
-        return self.repository.delete_account(account["id"])
-
-    def add_funds_to_account(self, user_ref: str, account_name: str, amount_cents: int) -> dict:
-        """Add funds to a cash account."""
-        if amount_cents <= 0:
-            raise ValueError("Amount must be positive")
-        
-        user = self.user_repo.get_user_by_clerk_id(user_ref)
-        if not user:
-            raise ValueError("User not found")
-        
-        account = self.repository.get_account_by_name(user["id"], account_name)
-        if not account:
-            raise ValueError(f"Account {account_name} not found")
-        
-        if account["account_type"] != "cash":
-            raise ValueError("Can only add funds to cash accounts")
-        
-        # Create an income transaction for the added funds
-        txn = self.repository.create_transaction(
-            clerk_user_id=user_ref,
-            amount=amount_cents,
-            type="income",
-            category="cash_deposit",
-            description=f"Added funds to {account_name}",
-            account_id=account["id"],
-            to_account_id=None,
-            payment_profile_id=None,
-            source="manual_add_funds",
-        )
-        return txn
-
+def reassign_expense_category(user_ref: str, journal_id: int, new_category: str) -> dict:
+    return repo_reassign_expense_category(
+        user_ref=user_ref, transaction_id=journal_id, new_category=new_category
+    )

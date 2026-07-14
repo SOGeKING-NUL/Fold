@@ -4,6 +4,17 @@
 <p>Track expenses naturally—just speak, snap a receipt, or type. Fold understands Hinglish, extracts transaction details automatically, and maintains professional double-entry accounting. Built specifically for the Indian payment ecosystem.</p>
 </div>
 
+---
+
+## ⚡ Project at a Glance (For Recruiters)
+
+Fold is a production-grade, multi-modal financial extraction platform that simplifies personal expense management. This project showcases:
+- **Advanced AI/ML Pipeline**: Integrates local Speech-to-Text (OpenAI Whisper), computer vision and text parsing (PaddleOCR + logo detection), and a custom-trained DistilBERT NLP classifier with 3 classification heads.
+- **Accounting Engine**: Implements a professional double-entry ledger database schema ensuring transaction integrity, balance protection, and clean audit logs.
+- **Hinglish & UPI Ecosystem Specialization**: Custom-trained to understand code-mixed Hinglish voice/text and resolve payment profiles (e.g. debiting HDFC Bank when GPay is mentioned).
+- **Production-Ready & Cloud-Native**: Dockerized with a security-hardened, non-root runner user configuration and automated deploy workflow using **GitHub Actions OIDC** to **Hugging Face Spaces**.
+
+
 ## 🏗️ How It Works (System Architecture)
 
 Fold uses a sophisticated multi-stage pipeline to extract financial data from any input modality. The system is built for ultra-low latency with synchronous processing—no queues, no polling, just instant results.
@@ -293,10 +304,12 @@ Response: Full transaction details with extracted data
 - **Authentication:** Clerk (OAuth, magic links)
 - **Language:** TypeScript
 
-### Infrastructure
+### Infrastructure & Cloud Architecture
+- **Containerization:** Docker (custom production-optimized debian-slim image, non-root run user UID 1000)
+- **CI/CD Pipeline:** GitHub Actions (OIDC-based automated deployment to Hugging Face Spaces)
 - **Bot Platform:** Telegram Bot API
-- **Processing Model:** Synchronous (no queues, no workers)
-- **Deployment:** Self-hosted / Cloud-ready
+- **Processing Model:** Synchronous low-latency pipeline (no queues, no polling)
+- **Deployment Platform:** Hugging Face Spaces (Docker SDK)
 
 ---
 

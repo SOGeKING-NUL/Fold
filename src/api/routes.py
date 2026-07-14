@@ -2,11 +2,16 @@
 API Routes
 ==========
 Defines the FastAPI endpoint handlers for the three extraction pipelines
-(audio, text, image) plus the category correction endpoint.
+(audio, text, image).
 
 Each route receives raw input, passes it through the appropriate AI engine
 (STT / OCR / direct), and then funnels the result through the unified
 NLP TransactionExtractor to produce a normalized JSON response.
+
+Pipelines:
+    1. TEXT:  Raw text → NLP extraction
+    2. AUDIO: Audio file → Whisper STT → transcript → NLP extraction
+    3. IMAGE: Image → PaddleOCR → Ollama structuring → NLP classification
 """
 
 import os
@@ -15,8 +20,6 @@ import tempfile
 from fastapi import APIRouter, UploadFile, File, HTTPException
 
 # ─── Fix imports: add `src/` to the Python path ─────────────────────────
-# This allows us to import sibling packages (ocr, stt, nlp) cleanly
-# regardless of how the server is launched.
 SRC_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if SRC_DIR not in sys.path:
     sys.path.insert(0, SRC_DIR)
@@ -25,15 +28,14 @@ import logging
 
 from api.schemas import (
     TextRequest,
-    CorrectionRequest,
     TransactionData,
     TransactionResponse,
     ErrorResponse,
 )
 from api.config import get_settings
 from nlp.inference import TransactionExtractor
-from nlp.ollama_structurer import OllamaStructurer
-from stt.transcriber import VoiceTranscriber
+from nlp.llm_structurer import structure_from_ocr
+from stt.transcriber import transcribe_audio
 from ocr.extractor import ReceiptOCR
 from ocr.upi_detector import UPIAppDetector
 
@@ -44,12 +46,9 @@ router = APIRouter(prefix="/api/v1")
 
 # ─── Lazy-loaded AI engines (initialized once on first request) ──────────
 _nlp: TransactionExtractor | None = None
-_stt: VoiceTranscriber | None = None
 _ocr: ReceiptOCR | None = None
 _upi_detector: UPIAppDetector | None = None
 _upi_detector_checked = False
-_ollama_structurer: OllamaStructurer | None = None
-_ollama_structurer_checked = False
 
 
 def get_nlp() -> TransactionExtractor:
@@ -58,14 +57,6 @@ def get_nlp() -> TransactionExtractor:
     if _nlp is None:
         _nlp = TransactionExtractor()
     return _nlp
-
-
-def get_stt() -> VoiceTranscriber:
-    """Singleton loader for the Whisper STT engine."""
-    global _stt
-    if _stt is None:
-        _stt = VoiceTranscriber(model_size="small")
-    return _stt
 
 
 def get_ocr() -> ReceiptOCR:
@@ -96,31 +87,6 @@ def get_upi_detector() -> UPIAppDetector | None:
     return _upi_detector
 
 
-def get_ollama_structurer() -> OllamaStructurer | None:
-    """Singleton loader for local Ollama OCR text structurer (optional)."""
-    global _ollama_structurer, _ollama_structurer_checked
-    if not _ollama_structurer_checked:
-        _ollama_structurer_checked = True
-        try:
-            settings = get_settings()
-            if settings.ollama_enabled:
-                _ollama_structurer = OllamaStructurer(
-                    base_url=settings.ollama_base_url,
-                    model=settings.ollama_model,
-                    timeout_seconds=settings.ollama_timeout_seconds,
-                )
-                _logger.info(
-                    "Ollama structurer enabled (base=%s model=%s)",
-                    settings.ollama_base_url,
-                    settings.ollama_model,
-                )
-            else:
-                _logger.info("OLLAMA_ENABLED=false — Ollama structurer disabled")
-        except Exception:
-            _logger.exception("Failed to init Ollama structurer — disabled")
-    return _ollama_structurer
-
-
 # ═══════════════════════════════════════════════════════════════════════
 # 1. TEXT PIPELINE
 # ═══════════════════════════════════════════════════════════════════════
@@ -131,7 +97,7 @@ async def extract_from_text(request: TextRequest):
     Extract structured transaction data from a raw text message.
     This is the simplest pipeline — bypasses STT and OCR entirely.
 
-    Used when a WhatsApp user sends a plain text message like:
+    Used when a user sends a plain text message like:
         "Swiggy se 450 rupaye ka pizza mangwaya UPI se"
     """
     try:
@@ -171,9 +137,8 @@ async def extract_from_audio(file: UploadFile = File(...)):
             tmp_path = tmp.name
 
         # Step 1: Transcribe audio → text
-        stt = get_stt()
-        stt_result = stt.process_audio(tmp_path)
-        transcript = stt_result["transcript"]
+        settings = get_settings()
+        transcript = transcribe_audio(tmp_path, api_key=settings.sarvam_api_key)
 
         # Step 2: Extract structured data from transcript
         nlp = get_nlp()
@@ -203,14 +168,13 @@ async def extract_from_audio(file: UploadFile = File(...)):
 @router.post("/extract/image", response_model=TransactionResponse)
 async def extract_from_image(file: UploadFile = File(...)):
     """
-    Extract structured transaction data from a receipt image.
+    Extract structured transaction data from a receipt or UPI screenshot.
 
     Flow:
-      1) Roboflow logo model first (UPI detection),
-      2) OCR mode decision:
-         - UPI detected -> raw OCR
-         - no UPI detected -> preprocessed OCR
-      3) OCR transcript to NLP.
+      1) Roboflow logo model detects if this is a UPI screenshot
+      2) PaddleOCR extracts raw text from the image
+      3) Groq (LLM) structures the noisy OCR text into clean JSON
+      4) NLP model classifies the category
     """
     try:
         suffix = os.path.splitext(file.filename or ".jpg")[1]
@@ -219,52 +183,44 @@ async def extract_from_image(file: UploadFile = File(...)):
             tmp.write(content)
             tmp_path = tmp.name
 
-        # Step 1: Visual UPI logo detection first (model-driven routing)
+        # Step 1: Visual UPI logo detection (identifies if screenshot is from GPay, PhonePe, etc.)
         visual_provider: str | None = None
         detector = get_upi_detector()
         if detector is not None:
             visual_provider = detector.detect(tmp_path)
 
-        # Step 2: Run PaddleOCR. Preprocessing intentionally disabled in
-        # OCR->LLM->NLP flow for both UPI and normal receipts.
-        # use_preprocessing = not bool(visual_provider)
-        use_preprocessing = False
+        # Step 2: Run PaddleOCR to extract text from the image
         ocr = get_ocr()
-        ocr_result = ocr.process_receipt(tmp_path, use_preprocessing=use_preprocessing)
+        ocr_result = ocr.process_receipt(tmp_path, use_preprocessing=False)
+        all_text = ocr_result.get("raw_text", "")
 
-        all_text = " ".join(ocr_result.get("all_lines", []))
-        ocr_parsed = ocr_result.get("parsed", {})
-
-        # Step 3: Ollama structures OCR text (if enabled)
+        # Step 3: Groq structures the noisy OCR text into clean fields
+        # OCR text from receipts is messy and unstructured — an LLM is the
+        # best tool to make sense of scattered text fragments
         text_source = "upi_ocr" if visual_provider else "receipt_ocr"
-        ollama = get_ollama_structurer()
         llm_result: dict = {}
-        if ollama is not None:
+        settings = get_settings()
+        if settings.groq_api_key:
             try:
-                llm_result = ollama.structure_from_ocr(
+                llm_result = structure_from_ocr(
                     raw_text=all_text,
                     text_source=text_source,
-                    hints={
-                        "visual_provider": visual_provider,
-                        "ocr_amount": ocr_parsed.get("amount"),
-                        "ocr_payment_method": ocr_parsed.get("payment_method"),
-                        "ocr_payment_provider": ocr_parsed.get("payment_provider"),
-                        "instrument_last4": ocr_parsed.get("instrument_last4"),
-                        "instrument_institution_hint": ocr_parsed.get("instrument_institution_hint"),
-                    },
+                    api_key=settings.groq_api_key,
+                    hints={"visual_provider": visual_provider},
                 )
                 _logger.info(
-                    "[ExtractImage] ollama structured amount=%s method=%s provider=%s bank=%s cash_flow=%s",
+                    "[ExtractImage] LLM structured: amount=%s method=%s provider=%s bank=%s",
                     llm_result.get("amount"),
                     llm_result.get("payment_method"),
                     llm_result.get("payment_provider"),
                     llm_result.get("bank_account"),
-                    llm_result.get("cash_flow"),
                 )
             except Exception:
-                _logger.exception("Ollama structuring failed; continuing with OCR/NLP fallback")
+                _logger.exception("LLM structuring failed; continuing with NLP fallback")
 
-        # Step 4: NLP on LLM-preprocessed OCR text (NLP remains final extractor/category)
+        # Step 4: Build preprocessed text for NLP classification
+        # We prepend LLM's structured output so the DistilBERT model
+        # gets clean, readable text for category classification
         preprocessed_text = all_text
         if llm_result:
             llm_lines = []
@@ -278,8 +234,7 @@ async def extract_from_image(file: UploadFile = File(...)):
                 llm_lines.append(f"provider {llm_result['payment_provider']}")
             if llm_result.get("bank_account"):
                 llm_lines.append(f"bank {llm_result['bank_account']}")
-            if llm_result.get("cash_flow"):
-                llm_lines.append(f"cash flow {llm_result['cash_flow']}")
+
             llm_hint_text = " ; ".join(llm_lines).strip()
             if llm_hint_text:
                 preprocessed_text = f"{llm_hint_text}\n{all_text}".strip()
@@ -287,57 +242,19 @@ async def extract_from_image(file: UploadFile = File(...)):
         nlp = get_nlp()
         nlp_result = nlp.extract(preprocessed_text or "expense")
 
-        # Merge:
-        # - UPI screenshots: NLP amount works better (currency-tagged / app-style text)
-        # - Invoice/bill images: OCR total-line extraction works better
-        is_upi_evidence = bool(
-            visual_provider
-            or llm_result.get("payment_provider")
-            or ocr_parsed.get("payment_provider")
-            or nlp_result.get("payment_provider")
-            or ocr_parsed.get("payment_method") == "upi"
-            or nlp_result.get("payment_method") == "upi"
-        )
-        # LLM is primary for OCR-derived extraction. NLP is mainly for category.
-        final_amount = llm_result.get("amount") or ocr_parsed.get("amount") or nlp_result.get("amount")
-        final_payment = llm_result.get("payment_method") or ocr_parsed.get("payment_method") or nlp_result.get("payment_method")
-        if final_payment == "unknown":
-            final_payment = llm_result.get("payment_method") or nlp_result.get("payment_method")
-
+        # Step 5: Merge results — LLM is primary for OCR fields, NLP for category
+        final_amount = llm_result.get("amount") or nlp_result.get("amount")
+        final_payment = llm_result.get("payment_method") or nlp_result.get("payment_method")
         final_provider = (
             visual_provider
             or llm_result.get("payment_provider")
-            or ocr_parsed.get("payment_provider")
             or nlp_result.get("payment_provider")
         )
         final_bank = llm_result.get("bank_account") or nlp_result.get("bank_account")
-        final_cash_flow = llm_result.get("cash_flow") or ocr_parsed.get("cash_flow") or nlp_result.get("cash_flow")
 
-        # debug: where final amount was chosen from
-        amount_source = "none"
-        if llm_result.get("amount") is not None:
-            amount_source = "llm"
-        elif ocr_parsed.get("amount") is not None:
-            amount_source = "ocr"
-        elif nlp_result.get("amount") is not None:
-            amount_source = "nlp"
-
+        # If we know the UPI provider, the payment method must be "upi"
         if final_provider and (final_payment is None or final_payment == "unknown"):
             final_payment = "upi"
-        if is_upi_evidence and (final_payment is None or final_payment == "unknown"):
-            final_payment = "upi"
-
-        _logger.info(
-            "[ExtractImage] merged amount=%s method=%s provider=%s bank=%s cash_flow=%s amount_source=%s llm_called=%s llm_success=%s",
-            final_amount,
-            final_payment,
-            final_provider,
-            final_bank,
-            final_cash_flow,
-            amount_source,
-            ollama is not None,
-            bool(llm_result),
-        )
 
         os.unlink(tmp_path)
 
@@ -350,12 +267,6 @@ async def extract_from_image(file: UploadFile = File(...)):
                 payment_method=final_payment,
                 payment_provider=final_provider,
                 bank_account=final_bank,
-                cash_flow=final_cash_flow,
-                receipt_account_last4=ocr_parsed.get("instrument_last4"),
-                receipt_institution_hint=ocr_parsed.get("instrument_institution_hint"),
-                debug_is_upi_evidence=is_upi_evidence,
-                debug_amount_source=amount_source,
-                debug_ocr_preprocessing=use_preprocessing,
             )
         )
     except Exception as e:
@@ -392,27 +303,3 @@ async def debug_upi_logo(file: UploadFile = File(...)):
             os.unlink(tmp_path)
         raise HTTPException(status_code=500, detail=str(e))
 
-
-# ═══════════════════════════════════════════════════════════════════════
-# 4. CATEGORY CORRECTION (Memory System)
-# ═══════════════════════════════════════════════════════════════════════
-
-@router.post("/correct")
-async def correct_category(request: CorrectionRequest):
-    """
-    Save a user's category correction to the override map.
-    Future transactions containing this keyword will automatically
-    use the corrected category instead of the model's prediction.
-
-    Example request:
-        {"keyword": "xyz society", "correct_category": "rent"}
-    """
-    try:
-        nlp = get_nlp()
-        nlp.save_correction(request.keyword, request.correct_category)
-        return {
-            "status": "success",
-            "message": f"Saved: '{request.keyword}' → '{request.correct_category}'"
-        }
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))

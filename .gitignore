@@ -1,6 +1,11 @@
 venv/
+src/venv/
 __pycache__/
 *.pyc
 *.wav
 *.ogg
 .env
+*.safetensors
+src_old_/
+web/node_modules/
+web/.next/

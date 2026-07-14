@@ -27,10 +27,8 @@ class Settings:
     database_url: str
     roboflow_api_key: str
     roboflow_upi_model_id: str
-    ollama_enabled: bool
-    ollama_base_url: str
-    ollama_model: str
-    ollama_timeout_seconds: int
+    groq_api_key: str
+    sarvam_api_key: str
     max_transaction_inr: float = 10_000_000.0  # ₹1 crore
 
 
@@ -42,10 +40,8 @@ def get_settings() -> Settings:
     roboflow_upi_model_id = os.getenv(
         "ROBOFLOW_UPI_MODEL_ID", "document-classification/upi/1"
     )
-    ollama_enabled = os.getenv("OLLAMA_ENABLED", "false").lower() in ("1", "true", "yes")
-    ollama_base_url = os.getenv("OLLAMA_BASE_URL", "http://127.0.0.1:11434")
-    ollama_model = os.getenv("OLLAMA_MODEL", "qwen2.5:3b-instruct")
-    ollama_timeout_seconds = int(os.getenv("OLLAMA_TIMEOUT_SECONDS", "120"))
+    groq_api_key = os.getenv("GROQ_API_KEY", "")
+    sarvam_api_key = os.getenv("SARVAM_API_KEY", "")
     max_transaction_inr = float(os.getenv("MAX_TRANSACTION_INR", "1000000"))
 
     missing = []
@@ -59,9 +55,7 @@ def get_settings() -> Settings:
         database_url=database_url,
         roboflow_api_key=roboflow_api_key,
         roboflow_upi_model_id=roboflow_upi_model_id,
-        ollama_enabled=ollama_enabled,
-        ollama_base_url=ollama_base_url,
-        ollama_model=ollama_model,
-        ollama_timeout_seconds=ollama_timeout_seconds,
+        groq_api_key=groq_api_key,
+        sarvam_api_key=sarvam_api_key,
         max_transaction_inr=max_transaction_inr,
     )

@@ -20,14 +20,6 @@ class TransactionData(BaseModel):
     payment_method: Optional[str] = None
     payment_provider: Optional[str] = None
     bank_account: Optional[str] = None
-    cash_flow: Optional[Literal["expense", "income"]] = None
-    # From OCR payment-instrument row (e.g. "HDFC Bank 1751") when present
-    receipt_account_last4: Optional[str] = None
-    receipt_institution_hint: Optional[str] = None
-    # Debug visibility for image routing
-    debug_is_upi_evidence: Optional[bool] = None
-    debug_amount_source: Optional[str] = None
-    debug_ocr_preprocessing: Optional[bool] = None
 
 
 class TransactionResponse(BaseModel):
@@ -52,11 +44,6 @@ class TextRequest(BaseModel):
     """Request body for the /extract/text endpoint."""
     text: str
 
-
-class CorrectionRequest(BaseModel):
-    """Request body for the /correct endpoint (category override)."""
-    keyword: str
-    correct_category: str
 
 
 # Flat schema account types: cash (physical), bank (savings/current), credit (credit card)
@@ -116,20 +103,6 @@ class LedgerIncomeRequest(BaseModel):
     amount: float
     description: str
     destination_account_name: Optional[str] = None
-    source: str = "manual"
-    external_ref: Optional[str] = None
-    occurred_at: Optional[str] = None
-    category: Optional[str] = None
-    payment_method: Optional[str] = None
-
-
-class LedgerInvestmentRequest(BaseModel):
-    user_ref: str
-    amount: float
-    description: str
-    investment_account_code: str = "investment_portfolio"
-    funding_account_code: Optional[str] = None
-    funding_account_type: Optional[AccountType] = None
     source: str = "manual"
     external_ref: Optional[str] = None
     occurred_at: Optional[str] = None

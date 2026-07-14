@@ -15,39 +15,29 @@ from api.schemas import (
     LedgerTransactionsResponse,
     LedgerTransferRequest,
 )
-from api.services.ledger_service import LedgerService
-from api.services.ledger_service import (
-    AccountUpsertRequest as ServiceAccountUpsertRequest,
-    ExpenseRequest,
-    IncomeRequest,
-    OpeningBalanceRequest,
-    PaymentProfileUpsertRequest as ServicePaymentProfileUpsertRequest,
-    TransferRequest,
-)
+from api.services import ledger_service
+from api.repositories.ledger_repository import get_breakdown
 
 router = APIRouter(prefix="/api/v1/ledger", tags=["ledger"])
-ledger_service = LedgerService()
 
 
 @router.post("/expense", response_model=LedgerPostResponse)
 async def post_expense(request: LedgerPostRequest):
     try:
         result = ledger_service.post_expense(
-            ExpenseRequest(
-                user_ref=request.user_ref,
-                source=request.source,
-                description=request.description,
-                funding_account_name=request.funding_account_name,
-                amount=request.amount,
-                external_ref=request.external_ref,
-                occurred_at=request.occurred_at,
-                category=request.category,
-                payment_method=request.payment_method,
-                payment_provider=request.payment_provider,
-                receipt_account_last4=request.receipt_account_last4,
-                receipt_institution_hint=request.receipt_institution_hint,
-                bank_hint=request.bank_hint,
-            )
+            user_ref=request.user_ref,
+            source=request.source,
+            description=request.description,
+            funding_account_name=request.funding_account_name,
+            amount=request.amount,
+            external_ref=request.external_ref,
+            occurred_at=request.occurred_at,
+            category=request.category,
+            payment_method=request.payment_method,
+            payment_provider=request.payment_provider,
+            receipt_account_last4=request.receipt_account_last4,
+            receipt_institution_hint=request.receipt_institution_hint,
+            bank_hint=request.bank_hint,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -58,17 +48,15 @@ async def post_expense(request: LedgerPostRequest):
 async def post_income(request: LedgerIncomeRequest):
     try:
         result = ledger_service.post_income(
-            IncomeRequest(
-                user_ref=request.user_ref,
-                source=request.source,
-                description=request.description,
-                amount=request.amount,
-                destination_account_name=request.destination_account_name,
-                external_ref=request.external_ref,
-                occurred_at=request.occurred_at,
-                category=request.category,
-                payment_method=request.payment_method,
-            )
+            user_ref=request.user_ref,
+            source=request.source,
+            description=request.description,
+            amount=request.amount,
+            destination_account_name=request.destination_account_name,
+            external_ref=request.external_ref,
+            occurred_at=request.occurred_at,
+            category=request.category,
+            payment_method=request.payment_method,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -79,16 +67,14 @@ async def post_income(request: LedgerIncomeRequest):
 async def post_transfer(request: LedgerTransferRequest):
     try:
         result = ledger_service.post_transfer(
-            TransferRequest(
-                user_ref=request.user_ref,
-                source=request.source,
-                description=request.description,
-                amount=request.amount,
-                from_account_name=request.from_account_name,
-                to_account_name=request.to_account_name,
-                external_ref=request.external_ref,
-                occurred_at=request.occurred_at,
-            )
+            user_ref=request.user_ref,
+            source=request.source,
+            description=request.description,
+            amount=request.amount,
+            from_account_name=request.from_account_name,
+            to_account_name=request.to_account_name,
+            external_ref=request.external_ref,
+            occurred_at=request.occurred_at,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -99,14 +85,12 @@ async def post_transfer(request: LedgerTransferRequest):
 async def post_opening_balance(request: LedgerOpeningBalanceRequest):
     try:
         result = ledger_service.post_opening_balance(
-            OpeningBalanceRequest(
-                user_ref=request.user_ref,
-                source=request.source,
-                account_name=request.account_name,
-                amount=request.amount,
-                external_ref=request.external_ref,
-                occurred_at=request.occurred_at,
-            )
+            user_ref=request.user_ref,
+            source=request.source,
+            account_name=request.account_name,
+            amount=request.amount,
+            external_ref=request.external_ref,
+            occurred_at=request.occurred_at,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -117,23 +101,19 @@ async def post_opening_balance(request: LedgerOpeningBalanceRequest):
 async def upsert_account(request: AccountUpsertRequest):
     try:
         result = ledger_service.upsert_account(
-            ServiceAccountUpsertRequest(
-                user_ref=request.user_ref,
-                name=request.name,
-                account_type=request.account_type,
-                institution_name=request.institution_name,
-                account_number_last4=request.account_number_last4,
-            )
+            user_ref=request.user_ref,
+            name=request.name,
+            account_type=request.account_type,
+            institution_name=request.institution_name,
+            account_number_last4=request.account_number_last4,
         )
         # If opening balance is provided, record it as a transaction
         if request.opening_balance and request.opening_balance > 0:
             ledger_service.post_opening_balance(
-                OpeningBalanceRequest(
-                    user_ref=request.user_ref,
-                    source="account_creation",
-                    account_name=request.name,
-                    amount=request.opening_balance,
-                )
+                user_ref=request.user_ref,
+                source="account_creation",
+                account_name=request.name,
+                amount=request.opening_balance,
             )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -144,42 +124,6 @@ async def upsert_account(request: AccountUpsertRequest):
 async def list_accounts(user_ref: str):
     accounts = ledger_service.list_accounts(user_ref)
     return AccountListResponse(user_ref=user_ref, accounts=accounts)
-
-
-@router.put("/accounts/{user_ref}", response_model=LedgerPostResponse)
-async def update_account(user_ref: str, request: dict):
-    """Update an existing account's details."""
-    try:
-        account_name = request.get("account_name")
-        new_data = request.get("new_data")
-        
-        if not account_name or not new_data:
-            raise ValueError("account_name and new_data are required")
-        
-        result = ledger_service.update_account(user_ref, account_name, new_data)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    return LedgerPostResponse(result=result)
-
-
-@router.delete("/accounts/{user_ref}", response_model=LedgerPostResponse)
-async def delete_account(user_ref: str, account_name: str = Query(...)):
-    """Delete an account."""
-    try:
-        result = ledger_service.delete_account(user_ref, account_name)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    return LedgerPostResponse(result=result)
-
-
-@router.post("/accounts/{user_ref}/add-funds", response_model=LedgerPostResponse)
-async def add_funds_to_account(user_ref: str, account_name: str = Query(...), amount_cents: int = Query(...)):
-    """Add funds to a cash account."""
-    try:
-        result = ledger_service.add_funds_to_account(user_ref, account_name, amount_cents)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    return LedgerPostResponse(result=result)
 
 
 @router.post("/primary-funding", response_model=LedgerPostResponse)
@@ -194,9 +138,12 @@ async def set_primary_funding(request: PrimaryFundingRequest):
 
 
 @router.post("/accounts/{user_ref}/set-default", response_model=LedgerPostResponse)
-async def set_default_account(user_ref: str, account_name: str = Query(...)):
+async def set_default_account_endpoint(user_ref: str, request: dict):
     """Set an account as the default for its type (cash/bank/credit)."""
     try:
+        account_name = request.get("account_name")
+        if not account_name:
+            raise ValueError("account_name is required")
         result = ledger_service.set_default_account(user_ref, account_name)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -207,12 +154,10 @@ async def set_default_account(user_ref: str, account_name: str = Query(...)):
 async def upsert_payment_profile(request: PaymentProfileUpsertRequest):
     try:
         result = ledger_service.upsert_payment_profile(
-            ServicePaymentProfileUpsertRequest(
-                user_ref=request.user_ref,
-                provider=request.provider,
-                profile_name=request.profile_name,
-                linked_account_name=request.linked_account_name,
-            )
+            user_ref=request.user_ref,
+            provider=request.provider,
+            profile_name=request.profile_name,
+            linked_account_name=request.linked_account_name,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -244,7 +189,7 @@ async def get_breakdown_report(
     group_by: str = Query(default="account", pattern="^(account|payment_method|category)$"),
 ):
     days = 7 if period == "week" else 30
-    rows = ledger_service.repository.get_breakdown(user_ref, days=days, group_by=group_by)
+    rows = get_breakdown(user_ref, days=days, group_by=group_by)
     report = {"period": period, "group_by": group_by, "rows": rows}
     return LedgerReportResponse(user_ref=user_ref, report=report)
 
