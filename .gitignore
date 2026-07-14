@@ -5,7 +5,5 @@ __pycache__/
 *.wav
 *.ogg
 .env
-*.safetensors
-src_old_/
 web/node_modules/
 web/.next/
